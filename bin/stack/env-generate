@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+set -euo pipefail
+. "${SWRMGR_ROOT:-/opt/swarm-mgr}/lib/core.sh"
+
+# ------------------------------------------------------------------------------
+# Usage — displayed when the --help flag is provided
+# ------------------------------------------------------------------------------
+_usage() {
+  cat <<EOF
+Usage: swarm-mgr stack env-generate <stack-name>
+
+Generate a .env file for a new stack. Customize etc/template.env to
+define your application's environment variables.
+
+Arguments:
+  stack-name    Name of the stack
+
+Example:
+  swarm-mgr stack env-generate acme-corp
+EOF
+}
+
+# ------------------------------------------------------------------------------
+# Bail out if sourced for --help
+# ------------------------------------------------------------------------------
+[[ "${1:-}" == "--source-only" ]] && return 0 2>/dev/null || true
+
+stack="$(stack_name "${1}")"
+stacks_dir="${SWRMGR_STACKS_DIR:-/var/www/html}"
+folder="${stacks_dir}/${stack}"
+
+cd "${folder}" || exit 1
+
+if [[ -f "${SWRMGR_ROOT}/etc/template.env" ]]; then
+  cp "${SWRMGR_ROOT}/etc/template.env" .env
+else
+  touch .env
+fi
+
+run_hooks "stack:env-generate:after" "${stack}"
