@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+set -euo pipefail
+. "${SWRMGR_ROOT:-/opt/swrmgr}/lib/core.sh"
+
+stack="$(stack_name "${1}")"
+email="${2:-}"
+domain="$(stack_domain "${stack}")"
+url="https://${domain}"
+
+bw sync > /dev/null 2>&1
+
+# Find matching items
+mapfile -t item_ids < <(
+  bw list items --url "${url}" \
+    | jq -r ".[].id"
+)
+
+# If email specified, filter further
+if [[ -n "${email}" ]]; then
+  mapfile -t item_ids < <(
+    bw list items --url "${url}" \
+      | jq -r ".[] | select(.login.username == \"${email}\") | .id"
+  )
+fi
+
+for id in "${item_ids[@]}"; do
+  [[ -n "${id}" ]] || continue
+  bw delete item "${id}"
+done

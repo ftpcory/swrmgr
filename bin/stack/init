@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+set -euo pipefail
+. "${SWRMGR_ROOT:-/opt/swrmgr}/lib/core.sh"
+
+# ------------------------------------------------------------------------------
+# Usage — displayed when the --help flag is provided
+# ------------------------------------------------------------------------------
+_usage() {
+  cat <<EOF
+Usage: swrmgr stack init <stack-name>
+
+Initialize a new stack without deploying it. Creates the project
+directory, temp directories, IAM user, S3 resources, Secrets Manager
+entry, generates the environment, and creates the overlay network.
+
+Arguments:
+  stack-name    Name of the stack to initialize
+
+Example:
+  swrmgr stack init acme-corp
+EOF
+}
+
+# ------------------------------------------------------------------------------
+# Bail out if sourced for --help
+# ------------------------------------------------------------------------------
+[[ "${1:-}" == "--source-only" ]] && return 0 2>/dev/null || true
+
+stack="$(stack_name "${1}")"
+stacks_dir="${SWRMGR_STACKS_DIR:-/var/www/html}"
+project_root="${stacks_dir}/${stack}"
+
+[[ -n "${stack}" ]] || {
+  echo "A name argument is required"
+  exit 1
+}
+
+run_hooks "stack:init:before" "${stack}"
+
+# Create project directory
+[[ -d "${project_root}" ]] || {
+  mkdir -p "${project_root}"
+  touch "${project_root}/.env"
+  touch "${project_root}/stack.yml"
+}
+
+# Create temp directories
+[[ -d "/mnt/dbtmp/${stack}" ]] || {
+  mkdir -p "/mnt/dbtmp/${stack}"
+}
+
+cd "${project_root}" || exit 1
+
+# Copy initial env template if needed
+[[ -f .env ]] || {
+  [[ -f "${SWRMGR_ROOT}/etc/init.env" ]] && cp "${SWRMGR_ROOT}/etc/init.env" .env
+}
+
+# Initialize AWS resources
+swrmgr aws user-create "${stack}"
+swrmgr aws secrets-init "${stack}"
+
+# Generate environment
+swrmgr stack env-generate "${stack}"
+
+# Save secrets
+swrmgr stack env-save "${stack}"
+
+# Create overlay network
+docker network create --scope=swarm --attachable -d overlay "traefik-public-${stack}" 2>/dev/null || true
+
+run_hooks "stack:init:after" "${stack}"

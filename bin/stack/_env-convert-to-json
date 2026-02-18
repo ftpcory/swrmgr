@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+set -euo pipefail
+. "${SWRMGR_ROOT:-/opt/swrmgr}/lib/core.sh"
+
+stack="$(stack_name "${1}")"
+folder="$(stack_path "${stack}")"
+
+cd "${folder}" || exit 1
+
+jq -Rnc '
+  reduce inputs as $line (
+    {};
+    if $line | test("^\\s*#") or $line == "" then .
+    else
+      ($line | capture("^(?<key>[^=]+)=(?<value>.*)")) as $kv
+      | .[$kv.key] = ($kv.value | gsub("^\"|\"$"; ""))
+    end
+  )
+' < .env

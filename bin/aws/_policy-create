@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+[[ -n "${1:-}" ]] || { echo "no username provided. exiting"; exit 1; }
+
+user="${1}"
+iam_prefix="${SWRMGR_IAM_PREFIX:-swrmgr}"
+config_dir="${SWRMGR_CONFIG_DIR:-/etc/swrmgr}"
+
+cp "${SWRMGR_ROOT:-/opt/swrmgr}/etc/iam.json" "${config_dir}/${iam_prefix}-iam-policy-${user}.json"
+sed -i -e "s/REPLACE_NAME/${user}/g" "${config_dir}/${iam_prefix}-iam-policy-${user}.json"
+
+aws iam create-policy \
+  --policy-name "${iam_prefix}-iam-policy-${user}" \
+  --tags "Key=stack,Value=${user}" \
+  --policy-document "file://${config_dir}/${iam_prefix}-iam-policy-${user}.json"
+
+rm -f "${config_dir}/${iam_prefix}-iam-policy-${user}.json" || true

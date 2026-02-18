@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+. "${SWRMGR_ROOT:-/opt/swrmgr}/lib/core.sh"
+
+# ------------------------------------------------------------------------------
+# Usage — displayed when the --help flag is provided
+# ------------------------------------------------------------------------------
+_usage() {
+  cat <<EOF
+Usage: swrmgr stack env-test <stack-name>
+
+Validate that all required environment keys are present and non-empty
+in the stack's .env file. Required keys are configurable via the
+SWRMGR_REQUIRED_ENV_KEYS environment variable.
+
+Arguments:
+  stack-name    Name of the stack
+
+Example:
+  swrmgr stack env-test acme-corp
+EOF
+}
+
+# ------------------------------------------------------------------------------
+# Bail out if sourced for --help
+# ------------------------------------------------------------------------------
+[[ "${1:-}" == "--source-only" ]] && return 0 2>/dev/null || true
+
+STACK="$(stack_name "${1:-}")"
+FOLDER="$(stack_path "${STACK}")"
+TEST_CONTEXT="env"
+FAIL_MSG=""
+
+shift $(( $# > 0 ? 1 : 0 )) || true
+
+on_err() {
+  local ec=$?
+  echo "${FAIL_MSG:-unexpected error}" >&2
+  exit "$ec"
+}
+trap 'on_err' ERR
+
+fail() {
+  FAIL_MSG="$1"
+  return 1
+}
+
+require_env_set() {
+  local key="$1"
+  local line val
+  line="$(grep -i -m1 -E "^[[:space:]]*(export[[:space:]]+)?${key}[[:space:]]*=" .env || true)"
+  [[ -n "$line" ]] || fail "[${STACK}][ERROR] ${key} not found in .env"
+  val="${line#*=}"
+  val="${val%$'\r'}"
+  val="${val#\"}" && val="${val%\"}"
+  [[ -n "$val" ]] || fail "[${STACK}][ERROR] ${key} is empty in .env"
+}
+
+cd "${FOLDER}" || fail "cannot cd to stack folder: ${FOLDER}"
+
+[[ -f .env ]] || {
+  swrmgr stack env-retrieve "${STACK}" || fail "failed to retrieve .env for ${STACK}"
+  [[ -f .env ]] || fail ".env still missing after retrieval for ${STACK}"
+}
+
+# Required keys — customize via SWRMGR_REQUIRED_ENV_KEYS
+default_keys="AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY MARIADB_ROOT_PASSWORD MARIADB_PASSWORD DATABASE_EXPOSE_PORT DATABASE_NODE"
+for key in ${SWRMGR_REQUIRED_ENV_KEYS:-${default_keys}}; do
+  require_env_set "${key}"
+done
+
+# Run any plugin env validation hooks
+run_hooks "stack:env-test:after" "${STACK}"
+
+echo "env values are correct for ${STACK}"

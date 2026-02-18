@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+set -euo pipefail
+. "${SWRMGR_ROOT:-/opt/swrmgr}/lib/core.sh"
+
+# ------------------------------------------------------------------------------
+# Usage — displayed when the --help flag is provided
+# ------------------------------------------------------------------------------
+_usage() {
+  cat <<EOF
+Usage: swrmgr system up
+
+Start the entire system. Activates all nodes, generates overlay networks,
+runs plugin startup hooks (e.g. Traefik), and deploys all stacks in parallel.
+
+Options:
+  SWRMGR_MAX_PARALLEL    Max concurrent deploys (default: 10)
+
+Example:
+  swrmgr system up
+EOF
+}
+
+# ------------------------------------------------------------------------------
+# Bail out if sourced for --help
+# ------------------------------------------------------------------------------
+[[ "${1:-}" == "--source-only" ]] && return 0 2>/dev/null || true
+
+run_hooks "system:up:before"
+
+# Reactivate all nodes
+while read -r node; do
+  [[ "${node}" == "$(hostname)" ]] && continue
+  docker node update --availability=active "${node}"
+done <<< "$(swrmgr system node-list)"
+
+# Ensure all networks exist
+swrmgr system _network-generate
+
+# Run plugin startup hooks (traefik, docx, etc.)
+run_hooks "system:up:services"
+
+# Deploy all stacks in parallel
+fail_file="$(mktemp)"
+trap 'rm -f "$fail_file"' EXIT
+
+max_parallel="${SWRMGR_MAX_PARALLEL:-10}"
+job_count=0
+
+while read -r stack; do
+  (
+    swrmgr stack up "${stack}" || echo "${stack}" >> "$fail_file"
+    sleep $((RANDOM % 10 + 3))
+  ) &
+
+  ((job_count++))
+  if (( job_count >= max_parallel )); then
+    wait -n
+    ((job_count--))
+  fi
+done <<< "$(swrmgr system stack-list)"
+
+wait
+
+if [[ -s "$fail_file" ]]; then
+  echo ""
+  echo "Failed stacks:"
+  cat "${fail_file}"
+  exit 1
+fi
+
+run_hooks "system:up:after"

@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+set -euo pipefail
+. "${SWRMGR_ROOT:-/opt/swrmgr}/lib/core.sh"
+
+# ------------------------------------------------------------------------------
+# Usage — displayed when the --help flag is provided
+# ------------------------------------------------------------------------------
+_usage() {
+  cat <<EOF
+Usage: swrmgr stack yaml-generate <stack-name>
+
+Generate the Docker Compose stack YAML from the template in etc/stack.yml.
+Sources the stack's .env, exports required variables, and runs envsubst.
+
+Arguments:
+  stack-name    Name of the stack
+
+Example:
+  swrmgr stack yaml-generate acme-corp
+EOF
+}
+
+# ------------------------------------------------------------------------------
+# Bail out if sourced for --help
+# ------------------------------------------------------------------------------
+[[ "${1:-}" == "--source-only" ]] && return 0 2>/dev/null || true
+
+stack="$(stack_name "${1}")"
+folder="$(stack_path "${stack}")"
+IMG_TAG="stable"
+
+[[ -n "${stack}" ]] || { echo "no name provided"; exit 1; }
+[[ -d "${folder}" ]] || { echo "the environment provided doesn't exist"; exit 1; }
+
+cd "${folder}" || exit 1
+touch stack.yml
+
+# Source env values (excluding AWS credentials)
+set -a
+source <(grep -i -v -E 'AWS_' .env)
+set +a
+
+# Mandatory variables
+: "${DATABASE_NODE:?DATABASE_NODE is not set}"
+: "${DATABASE_EXPOSE_PORT:?DATABASE_EXPOSE_PORT is not set}"
+
+# Compute local values
+AWSLOG_GROUP="$(hostname | sed -e 's/\./-/g')"
+
+# Export everything envsubst needs
+export stack IMG_TAG AWSLOG_GROUP
+export DATABASE_NODE DATABASE_EXPOSE_PORT
+export STACK_DOMAIN="${STACK_DOMAIN:-${stack}}"
+
+# Run any plugin config resolution hooks
+run_hooks "stack:yaml-generate:before" "${stack}"
+
+envsubst < "${SWRMGR_ROOT}/etc/stack.yml" > stack.yml

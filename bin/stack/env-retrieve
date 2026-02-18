@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+set -euo pipefail
+. "${SWRMGR_ROOT:-/opt/swrmgr}/lib/core.sh"
+
+# ------------------------------------------------------------------------------
+# Usage — displayed when the --help flag is provided
+# ------------------------------------------------------------------------------
+_usage() {
+  cat <<EOF
+Usage: swrmgr stack env-retrieve <stack-name>
+
+Download the stack's env.json from AWS Secrets Manager, convert to .env,
+and append shared secrets. Retries with exponential backoff (max 10 attempts).
+
+Arguments:
+  stack-name    Name of the stack
+
+Example:
+  swrmgr stack env-retrieve acme-corp
+EOF
+}
+
+# ------------------------------------------------------------------------------
+# Bail out if sourced for --help
+# ------------------------------------------------------------------------------
+[[ "${1:-}" == "--source-only" ]] && return 0 2>/dev/null || true
+
+stack="$(stack_name "${1}")"
+folder="$(stack_path "${stack}")"
+
+cd "${folder}" || exit 1
+
+attempt=0
+max_attempts=10
+backoff=2
+
+while true; do
+  if aws secretsmanager get-secret-value \
+    --secret-id "swrmgr/customer/${stack}/env.json" \
+    --output json \
+    | jq -r '.SecretString' > env.json; then
+    break
+  else
+    ((attempt++))
+    if (( attempt >= max_attempts )); then
+      echo "Failed to retrieve secret after ${max_attempts} attempts"
+      exit 1
+    fi
+    sleep_time=$(( backoff ** attempt ))
+    echo "Retrying in ${sleep_time}s (attempt ${attempt})..."
+    sleep "${sleep_time}"
+  fi
+done
+
+swrmgr stack _env-convert-to-env "${stack}"
+
+# Append shared secrets if configured
+set -a
+source <(grep -i -E 'IMG_TAG' .env)
+set +a
+swrmgr stack _env-shared "${IMG_TAG:-stable}" >> .env

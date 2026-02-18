@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+environment="${1:-stable}"
+secrets_prefix="${SWRMGR_SHARED_SECRETS_PREFIX:-swrmgr/shared}"
+
+while read -r secret; do
+  [[ -n "${secret}" ]] || continue
+  value="$(aws secretsmanager \
+    get-secret-value \
+      --secret-id "${secret}" | jq -r '.SecretString')"
+
+  jq -r 'to_entries[] | "\(.key)=\(.value)"' <<< "${value}"
+done <<< "$(aws secretsmanager list-secrets \
+    --query "SecretList[?starts_with(Name, '${secrets_prefix}/${environment}')].[Name]" \
+    --output text 2>/dev/null | tr '\t' '\n')"

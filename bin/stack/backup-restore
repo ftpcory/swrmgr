@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+set -euo pipefail
+. "${SWRMGR_ROOT:-/opt/swrmgr}/lib/core.sh"
+
+# ------------------------------------------------------------------------------
+# Usage — displayed when the --help flag is provided
+# ------------------------------------------------------------------------------
+_usage() {
+  cat <<EOF
+Usage: swrmgr stack backup-restore <stack-name> [node] [hold]
+
+Restore a previously retrieved and decrypted backup to the database
+node. Uses rsync with --delete to ensure a clean restore.
+
+Arguments:
+  stack-name    Name of the stack to restore
+  node          Optional — target node (defaults to stack's DATABASE_NODE)
+  hold          Optional — keep stack down after restore
+
+Example:
+  swrmgr stack backup-restore acme-corp
+  swrmgr stack backup-restore acme-corp worker-03
+  swrmgr stack backup-restore acme-corp worker-03 hold
+EOF
+}
+
+# ------------------------------------------------------------------------------
+# Bail out if sourced for --help
+# ------------------------------------------------------------------------------
+[[ "${1:-}" == "--source-only" ]] && return 0 2>/dev/null || true
+
+stack="$(stack_name "${1}")"
+node="${2:-}"
+hold="${3:-}"
+folder="$(stack_path "${stack}")"
+
+[[ -z "${node}" ]] && node="$(swrmgr stack env-get "${stack}" database_node)"
+
+cd "${folder}" || exit 1
+[[ -n "${node}" ]] || exit 1
+[[ -d _data ]] || exit 1
+
+run_hooks "stack:restore:before" "${stack}"
+
+swrmgr stack down "${stack}"
+
+# Transfer backup to the node
+rsync -ra --delete --quiet --mkpath _data "${node}:/home/ubuntu/${stack}_dbdata"
+ssh -n "${node}" sudo rsync -ra --delete --quiet --mkpath "/home/ubuntu/${stack}_dbdata" /var/lib/docker/volumes/
+ssh -n "${node}" sudo rm -rf "/home/ubuntu/${stack}_dbdata"
+
+# Fix permissions
+ssh -n "${node}" sudo chown -R root:root "/var/lib/docker/volumes/${stack}_dbdata"
+ssh -n "${node}" sudo chown -R lxd:docker "/var/lib/docker/volumes/${stack}_dbdata/_data/"
+
+[[ -z "${hold}" ]] && swrmgr stack up "${stack}"
+
+run_hooks "stack:restore:after" "${stack}"

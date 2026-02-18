@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+set -euo pipefail
+. "${SWRMGR_ROOT:-/opt/swrmgr}/lib/core.sh"
+
+# ------------------------------------------------------------------------------
+# Usage — displayed when the --help flag is provided
+# ------------------------------------------------------------------------------
+_usage() {
+  cat <<EOF
+Usage: swrmgr stack down <stack-name>
+
+Stop a stack's services. Data volumes are preserved.
+Exits quietly if the stack is already down.
+
+Arguments:
+  stack-name    Name of the stack to stop
+
+Example:
+  swrmgr stack down acme-corp
+EOF
+}
+
+# ------------------------------------------------------------------------------
+# Bail out if sourced for --help
+# ------------------------------------------------------------------------------
+[[ "${1:-}" == "--source-only" ]] && return 0 2>/dev/null || true
+
+stack="$(stack_name "${1}")"
+folder="$(stack_path "${stack}")"
+
+cd "${folder}" || exit 1
+
+run_hooks "stack:down:before" "${stack}"
+
+# If already down, exit quietly
+[[ -z "$(docker stack ls | grep "${stack}")" ]] && exit 0
+
+docker stack rm "${stack}"
+
+run_hooks "stack:down:after" "${stack}"

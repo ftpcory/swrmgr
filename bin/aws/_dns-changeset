@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+name="${1}"
+value="${2}"
+action="${3:-UPSERT}"
+
+template='{"Comment":"ACTION CNAME for NAME","Changes":[{"Action":"ACTION","ResourceRecordSet":{"Name":"NAME","Type":"CNAME","TTL":300,"ResourceRecords":[{"Value":"VALUE"}]}}]}'
+
+echo "${template}" \
+  | sed -e "s/ACTION/${action}/g" \
+        -e "s/NAME/${name}/g" \
+        -e "s/VALUE/${value}/g"

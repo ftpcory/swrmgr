@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+set -euo pipefail
+. "${SWRMGR_ROOT:-/opt/swrmgr}/lib/core.sh"
+
+# ------------------------------------------------------------------------------
+# Usage — displayed when the --help flag is provided
+# ------------------------------------------------------------------------------
+_usage() {
+  cat <<EOF
+Usage: swrmgr stack env-save <stack-name>
+
+Validate the .env file, strip shared secrets, and push to AWS Secrets
+Manager. Refuses to save if env-test validation fails.
+
+Arguments:
+  stack-name    Name of the stack
+
+Example:
+  swrmgr stack env-save acme-corp
+EOF
+}
+
+# ------------------------------------------------------------------------------
+# Bail out if sourced for --help
+# ------------------------------------------------------------------------------
+[[ "${1:-}" == "--source-only" ]] && return 0 2>/dev/null || true
+
+stack="$(stack_name "${1}")"
+folder="$(stack_path "${stack}")"
+
+cd "${folder}" || exit 1
+
+# Validate before saving
+swrmgr stack env-test "${stack}" || {
+  echo "env validation failed for ${stack}: refusing to save" >&2
+  exit 1
+}
+
+# Strip shared secrets before saving (these are retrieved dynamically)
+grep -i -E -v "${SWRMGR_SHARED_ENV_FILTER:-SENTRY_|SAP_|SMTP_|MAIL_|MAILGUN_}" .env > filtered.env
+mv filtered.env .env
+
+# Save to Secrets Manager
+aws secretsmanager \
+  put-secret-value \
+    --secret-id "swrmgr/customer/${stack}/env.json" \
+    --secret-string "$(swrmgr stack _env-convert-to-json "${stack}")"

@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+set -euo pipefail
+. "${SWRMGR_ROOT:-/opt/swrmgr}/lib/core.sh"
+
+# ------------------------------------------------------------------------------
+# Usage — displayed when the --help flag is provided
+# ------------------------------------------------------------------------------
+_usage() {
+  cat <<EOF
+Usage: swrmgr stack env-get <stack-name> <key>
+
+Read a single value from the stack's .env file. Retrieves the env
+from Secrets Manager first if no local .env exists.
+
+Arguments:
+  stack-name    Name of the stack
+  key           Environment variable name (case-insensitive)
+
+Example:
+  swrmgr stack env-get acme-corp DATABASE_NODE
+EOF
+}
+
+# ------------------------------------------------------------------------------
+# Bail out if sourced for --help
+# ------------------------------------------------------------------------------
+[[ "${1:-}" == "--source-only" ]] && return 0 2>/dev/null || true
+
+stack="$(stack_name "${1}")"
+folder="$(stack_path "${stack}")"
+key="${2^^}"
+
+cd "${folder}" || exit 1
+
+[[ -f .env ]] || swrmgr stack env-retrieve "${stack}"
+
+grep -i "^${key}=" .env | head -1 | cut -d'=' -f2- | tr -d '"'

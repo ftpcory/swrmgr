@@ -1,0 +1,76 @@
+#!/usr/bin/env bash
+set -euo pipefail
+. "${SWRMGR_ROOT:-/opt/swrmgr}/lib/core.sh"
+
+cd /var/www/html || exit 1
+
+POOLS=( "172.20" "172.21" )
+
+declare -A EXISTING_SUBNET=()
+while read -r name subnet; do
+  [[ -n "$name" ]] || continue
+  EXISTING_SUBNET["$name"]="$subnet"
+done < <(
+  docker network ls --filter driver=overlay --format '{{.Name}}' \
+    | while read -r n; do
+        s="$(docker network inspect "$n" --format '{{range .IPAM.Config}}{{.Subnet}}{{end}}' 2>/dev/null || true)"
+        echo "$n $s"
+      done
+)
+
+declare -A USED=()
+for n in "${!EXISTING_SUBNET[@]}"; do
+  s="${EXISTING_SUBNET[$n]}"
+  if [[ "$s" =~ ^172\.(20|21)\.([0-9]{1,3})\.0/24$ ]]; then
+    pool="${BASH_REMATCH[1]}"
+    oct="${BASH_REMATCH[2]}"
+    USED["$pool:$oct"]=1
+  fi
+done
+
+next_free_octet() {
+  local pool="$1"
+  for o in $(seq 0 255); do
+    if [[ -z "${USED[$pool:$o]:-}" ]]; then
+      echo "$o"
+      return 0
+    fi
+  done
+  return 1
+}
+
+create_overlay_with_subnet() {
+  local name="$1"
+
+  if docker network inspect "$name" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  local pool oct base subnet
+  for base in "${POOLS[@]}"; do
+    pool="${base#172.}"
+    if oct="$(next_free_octet "$pool")"; then
+      USED["$pool:$oct"]=1
+      subnet="${base}.${oct}.0/24"
+      echo "CREATE: $name -> $subnet"
+      docker network create \
+        --driver overlay \
+        --attachable \
+        --subnet "$subnet" \
+        "$name" >/dev/null
+      return 0
+    fi
+  done
+
+  echo "ERROR: No free /24 left in pools: ${POOLS[*]}" >&2
+  return 1
+}
+
+# Shared networks
+create_overlay_with_subnet "traefik-public"
+
+# Per-stack networks
+while read -r stack; do
+  [[ -n "${stack}" ]] || continue
+  create_overlay_with_subnet "traefik-public-${stack}"
+done <<< "$(swrmgr system stack-list)"

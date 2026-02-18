@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+set -euo pipefail
+. "${SWRMGR_ROOT:-/opt/swrmgr}/lib/core.sh"
+
+stack="$(stack_name "${1}")"
+folder="$(stack_path "${stack}")"
+cd "${folder}" || exit 1
+
+domain="$(stack_domain "${stack}")"
+api_domain="$(swrmgr stack env-get "${stack}" "API_DOMAIN" 2>/dev/null || echo "${stack}-api.${domain}")"
+cname="$(swrmgr aws _dns-cname)"
+node="$(swrmgr stack env-get "${stack}" "database_node")"
+
+[[ -n "${cname}" ]] || { echo "no cname record found for ${stack}"; exit 1; }
+
+region="${SWRMGR_AWS_REGION:-us-east-1}"
+
+# Public DNS — frontend and API
+if [[ -n "${PUBLIC_DNS_ZONE_ID:-}" ]]; then
+  aws route53 change-resource-record-sets \
+    --region "${region}" \
+    --hosted-zone-id "${PUBLIC_DNS_ZONE_ID}" \
+    --change-batch "$(swrmgr aws _dns-changeset "${domain}" "${cname}" "UPSERT")"
+
+  aws route53 change-resource-record-sets \
+    --region "${region}" \
+    --hosted-zone-id "${PUBLIC_DNS_ZONE_ID}" \
+    --change-batch "$(swrmgr aws _dns-changeset "${api_domain}" "${cname}" "UPSERT")"
+fi
+
+# Private DNS — database
+if [[ -n "${PRIVATE_DNS_ZONE_ID:-}" && -n "${PRIVATE_DNS_ZONE_NAME:-}" ]]; then
+  aws route53 change-resource-record-sets \
+    --region "${region}" \
+    --hosted-zone-id "${PRIVATE_DNS_ZONE_ID}" \
+    --change-batch "$(swrmgr aws _dns-changeset "${stack}-db.${PRIVATE_DNS_ZONE_NAME}" "${node}" "UPSERT")"
+fi

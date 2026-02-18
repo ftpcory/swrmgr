@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+set -euo pipefail
+. "${SWRMGR_ROOT:-/opt/swrmgr}/lib/core.sh"
+
+# ------------------------------------------------------------------------------
+# Usage — displayed when the --help flag is provided
+# ------------------------------------------------------------------------------
+_usage() {
+  cat <<EOF
+Usage: swrmgr system down
+
+Stop the entire system. Shuts down all stacks, waits for completion,
+then drains all worker nodes.
+
+Example:
+  swrmgr system down
+EOF
+}
+
+# ------------------------------------------------------------------------------
+# Bail out if sourced for --help
+# ------------------------------------------------------------------------------
+[[ "${1:-}" == "--source-only" ]] && return 0 2>/dev/null || true
+
+run_hooks "system:down:before"
+
+# Shut down all stacks
+while read -r stack; do
+  swrmgr stack down "${stack}" &
+done <<< "$(swrmgr system stack-list)"
+
+wait
+
+# Wait for all stacks to finish shutting down
+while (( $(docker stack ls --format '{{.Name}}' | wc -l) > 0 )); do
+  printf "%s - %s stacks remaining\r" "$(date +%s)" "$(docker stack ls --format '{{.Name}}' | wc -l)"
+  sleep 1
+done
+
+# Drain worker nodes
+while read -r node; do
+  [[ "${node}" == "$(hostname)" ]] && continue
+  docker node update --availability=drain "${node}"
+done <<< "$(swrmgr system node-list)"
+
+run_hooks "system:down:after"

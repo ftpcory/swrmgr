@@ -1,0 +1,19 @@
+# OS files
+.DS_Store
+Thumbs.db
+ehthumbs.db
+
+# IDE/editor specific
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# Logs
+*.log
+
+# Misc
+*.swp
+*.swo
+*.bak
+*.tmp

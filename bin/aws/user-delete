@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+set -euo pipefail
+. "${SWRMGR_ROOT:-/opt/swrmgr}/lib/core.sh"
+
+[[ -n "${1:-}" ]] || { echo "no username provided. exiting"; exit 1; }
+
+user="${1}"
+iam_prefix="${SWRMGR_IAM_PREFIX:-swrmgr}"
+bucket="${SWRMGR_S3_BUCKET:?SWRMGR_S3_BUCKET is not set}"
+aws_account_id="${SWRMGR_AWS_ACCOUNT_ID:?SWRMGR_AWS_ACCOUNT_ID is not set}"
+iam_group="${SWRMGR_IAM_GROUP:-swrmgr-customer}"
+iam_user="${iam_prefix}-${user}"
+
+# Verify user exists
+aws iam get-user --user-name "${iam_user}" > /dev/null 2>&1 || {
+  echo "User: ${user} does not exist."
+  exit 1
+}
+
+# Delete access keys
+while read -r key_id; do
+  [[ -n "${key_id}" ]] || continue
+  aws iam delete-access-key --user-name "${iam_user}" --access-key-id "${key_id}"
+done <<< "$(aws iam list-access-keys --user-name "${iam_user}" | jq -r '.AccessKeyMetadata[].AccessKeyId')"
+
+# Remove from group
+aws iam remove-user-from-group --user-name "${iam_user}" --group-name "${iam_group}" 2>/dev/null || true
+
+# Detach all policies
+while read -r policy_arn; do
+  [[ -n "${policy_arn}" ]] || continue
+  aws iam detach-user-policy --user-name "${iam_user}" --policy-arn "${policy_arn}"
+done <<< "$(aws iam list-attached-user-policies --user-name "${iam_user}" --query 'AttachedPolicies[].PolicyArn' --output text | tr '\t' '\n')"
+
+# Delete user
+aws iam delete-user --user-name "${iam_user}" > /dev/null 2>&1 || true
+
+# Delete the per-user policy
+aws iam delete-policy --policy-arn "arn:aws:iam::${aws_account_id}:policy/${iam_prefix}-iam-policy-${user}" 2>/dev/null || true
+
+# Remove S3 data
+aws s3 rm --recursive "s3://${bucket}/${user}" || true

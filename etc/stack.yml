@@ -1,0 +1,57 @@
+# swrmgr stack template
+# All ${VARIABLE} references are resolved by envsubst at deploy time.
+# Customize this file for your application's services.
+
+services:
+  # Example database service
+  db:
+    env_file: .env
+    image: ${SWRMGR_ECR_REGISTRY}/your-org/db:stable
+    ports:
+      - target: 3306
+        published: ${DATABASE_EXPOSE_PORT}
+        protocol: tcp
+        mode: host
+    volumes:
+      - dbdata:/var/lib/mysql
+    networks:
+      - internal
+    deploy:
+      update_config:
+        parallelism: 1
+        order: stop-first
+        failure_action: rollback
+      labels:
+        - "traefik.enable=false"
+      placement:
+        constraints: [node.hostname == ${DATABASE_NODE}]
+
+  # Example application service
+  app:
+    env_file: .env
+    image: ${SWRMGR_ECR_REGISTRY}/your-org/app:${IMG_TAG}
+    networks:
+      - traefik-public-${stack}
+      - internal
+    deploy:
+      update_config:
+        parallelism: 1
+        order: start-first
+        failure_action: rollback
+      placement:
+        constraints: [node.role == worker]
+      labels:
+        - "traefik.enable=true"
+        - "traefik.docker.network=traefik-public-${stack}"
+        - "traefik.http.routers.${stack}_app.rule=Host(`${STACK_DOMAIN}`)"
+        - "traefik.http.routers.${stack}_app.entrypoints=web"
+        - "traefik.http.services.${stack}_app.loadbalancer.server.port=80"
+
+volumes:
+  dbdata:
+
+networks:
+  internal:
+    driver: overlay
+  traefik-public-${stack}:
+    external: true

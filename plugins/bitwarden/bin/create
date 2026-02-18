@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+set -euo pipefail
+. "${SWRMGR_ROOT:-/opt/swrmgr}/lib/core.sh"
+
+stack="$(stack_name "${1}")"
+email="${2}"
+password="${3}"
+domain="$(stack_domain "${stack}")"
+url="https://${domain}"
+org_id="${SWRMGR_BW_ORG_ID:?SWRMGR_BW_ORG_ID is not set}"
+
+# Sync vault
+bw sync > /dev/null 2>&1
+
+# Find collection matching the base domain
+collection_id="$(bw list collections \
+  --organizationid "${org_id}" \
+  | jq -r ".[] | select(.name | test(\"${SWRMGR_BASE_DOMAIN}\")) | .id" \
+  | head -1)"
+
+[[ -n "${collection_id}" ]] || {
+  echo "No Bitwarden collection found matching ${SWRMGR_BASE_DOMAIN}" >&2
+  exit 1
+}
+
+# Delete existing entries for this stack/email
+swrmgr bitwarden delete "${stack}" "${email}" 2>/dev/null || true
+
+# Build item JSON
+item_json="$(jq -n \
+  --arg name "${domain}" \
+  --arg username "${email}" \
+  --arg password "${password}" \
+  --arg url "${url}" \
+  --arg org "${org_id}" \
+  --arg col "${collection_id}" \
+  '{
+    organizationId: $org,
+    collectionIds: [$col],
+    type: 1,
+    name: $name,
+    login: {
+      username: $username,
+      password: $password,
+      uris: [{ match: null, uri: $url }]
+    }
+  }')"
+
+echo "${item_json}" | bw encode | bw create item

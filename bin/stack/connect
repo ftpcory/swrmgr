@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+set -euo pipefail
+. "${SWRMGR_ROOT:-/opt/swrmgr}/lib/core.sh"
+
+# ------------------------------------------------------------------------------
+# Usage — displayed when the --help flag is provided
+# ------------------------------------------------------------------------------
+_usage() {
+  cat <<EOF
+Usage: swrmgr stack connect <stack-name> <service>
+
+Open an interactive bash shell (as root) inside a running service container.
+
+Arguments:
+  stack-name    Name of the stack
+  service       Service name (e.g. db, app, worker, cron)
+
+Example:
+  swrmgr stack connect acme-corp app
+EOF
+}
+
+# ------------------------------------------------------------------------------
+# Bail out if sourced for --help
+# ------------------------------------------------------------------------------
+[[ "${1:-}" == "--source-only" ]] && return 0 2>/dev/null || true
+
+stack="$(stack_name "${1}")"
+service="${2}"
+
+[[ -n "${stack}" && -n "${service}" ]] || { _usage; exit 1; }
+
+KEY_FILE="${SWRMGR_SSH_KEY:-/home/ubuntu/.ssh/${NODE_SSH_KEY_NAME}}"
+[[ -f "${KEY_FILE}" ]] || { echo "SSH key not found: ${KEY_FILE}" >&2; exit 1; }
+
+node="$(swrmgr stack _node "${stack}" "${service}")"
+container="$(swrmgr stack _container "${stack}" "${service}")"
+
+[[ -n "${node}" ]] || { echo "could not determine node for ${stack}_${service}" >&2; exit 1; }
+[[ -n "${container}" ]] || { echo "could not determine container for ${stack}_${service}" >&2; exit 1; }
+
+ssh -i "${KEY_FILE}" -t "${node}" docker exec -u 0 -it "${container}" bash

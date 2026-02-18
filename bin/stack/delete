@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+set -euo pipefail
+. "${SWRMGR_ROOT:-/opt/swrmgr}/lib/core.sh"
+
+# ------------------------------------------------------------------------------
+# Usage — displayed when the --help flag is provided
+# ------------------------------------------------------------------------------
+_usage() {
+  cat <<EOF
+Usage: swrmgr stack delete <stack-name>
+
+Permanently destroy a stack and all associated resources. Requires
+interactive confirmation. Removes: Docker stack, project directory,
+temp directory, IAM user, DNS records, Secrets Manager entry, and
+Docker volumes across all nodes. Fires delete hooks for plugins.
+
+Arguments:
+  stack-name    Name of the stack to delete
+
+Example:
+  swrmgr stack delete acme-corp
+EOF
+}
+
+# ------------------------------------------------------------------------------
+# Bail out if sourced for --help
+# ------------------------------------------------------------------------------
+[[ "${1:-}" == "--source-only" ]] && return 0 2>/dev/null || true
+
+stack="$(stack_name "${1}")"
+project_root="$(stack_path "${stack}")"
+
+[[ -n "${stack}" ]] || {
+  echo "A stack argument is required"
+  exit 1
+}
+
+# Require confirmation
+read -r -p "This will permanently destroy this environment. Are you sure (y/N)? " answer
+[[ "$(echo "${answer}" | tr '[:upper:]' '[:lower:]')" == "y" ]] || exit 0
+
+run_hooks "stack:delete:before" "${stack}"
+
+docker context use default > /dev/null 2>&1
+
+# Remove stack and project files
+docker stack rm "${stack}" || true
+rm -rf "${project_root}"
+rm -rf "/mnt/dbtmp/${stack}"
+
+# Remove AWS resources
+swrmgr aws user-delete "${stack}"
+swrmgr aws dns-delete "${stack}"
+swrmgr aws secrets-delete "${stack}"
+
+# Wait for containers to release volumes
+sleep 30
+swrmgr stack _volume-delete "${stack}"
+
+docker context use default > /dev/null 2>&1
+
+run_hooks "stack:delete:after" "${stack}"

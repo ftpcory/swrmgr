@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+docker node ls --format '{{.Hostname}}' | grep -i -E 'worker|manager'

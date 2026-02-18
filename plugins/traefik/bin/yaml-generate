@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+set -euo pipefail
+. "${SWRMGR_ROOT:-/opt/swrmgr}/lib/core.sh"
+
+traefik_dir="${SWRMGR_TRAEFIK_DIR:-/opt/swrmgr/plugins/traefik/etc}"
+cd /var/www/html || exit 1
+
+# Build dynamic network sections
+network_providers=""
+networks=""
+external_networks=""
+
+while read -r stack; do
+  [[ -n "${stack}" ]] || continue
+  network_providers="${network_providers}      - \"--providers.docker.network=traefik-public-${stack}\"\n"
+  networks="${networks}      - traefik-public-${stack}\n"
+  external_networks="${external_networks}  traefik-public-${stack}:\n    external: true\n"
+done <<< "$(swrmgr system stack-list)"
+
+cat << TEMPLATE
+services:
+  lb:
+    image: traefik:v2.11
+    command:
+      - "--providers.docker.endpoint=unix:///var/run/docker.sock"
+      - "--providers.docker.swarmMode=true"
+      - "--providers.docker.exposedbydefault=true"
+      - "--providers.docker.network=traefik-public"
+      - "--api.dashboard=true"
+      - "--api.insecure=true"
+      - "--accesslog=true"
+      - "--accesslog.format=json"
+      - "--entrypoints.web.address=:80"
+      - "--entryPoints.web.forwardedHeaders.insecure"
+      - "--entryPoints.web.proxyProtocol.trustedIPs=127.0.0.1/32,10.0.0.0/8"
+      - "--metrics.prometheus=true"
+      - "--metrics.prometheus.addEntryPointsLabels=true"
+      - "--entryPoints.metrics.address=:8082"
+      - "--metrics.prometheus.entryPoint=metrics"
+$(echo -e "${network_providers}")
+    environment:
+      - TZ=UTC
+    ports:
+      - 80:80
+      - 8083:8080
+      - 8082:8082
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - traefik-public
+$(echo -e "${networks}")
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50k"
+    deploy:
+      mode: replicated
+      placement:
+        constraints: [node.role == manager]
+      labels:
+        - "traefik.enable=true"
+        - "traefik.http.services.traefik.loadbalancer.server.port=888"
+        - "traefik.http.routers.traefik.rule=Host(\`traefik.${SWRMGR_BASE_DOMAIN}\`)"
+        - "traefik.http.routers.traefik.entrypoints=traefik"
+        - "traefik.http.routers.traefik.service=api@internal"
+
+networks:
+  traefik-public:
+    external: true
+$(echo -e "${external_networks}")
+TEMPLATE

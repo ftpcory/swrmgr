@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Usage: swrmgr metrics save <stack> <test_name> <result> [details]
+# Requires: METRICS_DB_HOST, METRICS_DB_USER, METRICS_DB_PWD
+
+[[ -n "${METRICS_DB_HOST:-}" ]] || { echo "METRICS_DB_HOST not set" >&2; exit 1; }
+
+stack="${1:-system}"
+name="${2}"
+result="${3}"
+shift 3
+details="${*:-}"
+database="${SWRMGR_METRICS_DB:-SWRMGR_metrics}"
+
+# Sanitize details (strip single quotes)
+details="${details//\'/}"
+
+sql="INSERT INTO stack_tests (host, stack, test_name, result, details) VALUES ('$(hostname)', '${stack}', '${name}', '${result}', '${details}')"
+
+export MYSQL_PWD="${METRICS_DB_PWD}"
+mysql \
+  -h "${METRICS_DB_HOST}" \
+  -u "${METRICS_DB_USER}" \
+  -D "${database}" \
+  -e "${sql}"
