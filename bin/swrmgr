@@ -1,0 +1,119 @@
+#!/usr/bin/env bash
+# swrmgr — Multi-tenant Docker Swarm management toolkit
+# Usage: swrmgr <tower> <function> [arguments...]
+
+set -euo pipefail
+
+SWRMGR_ROOT="${SWRMGR_ROOT:-/opt/swrmgr}"
+
+# Source core library
+# shellcheck source=lib/core.sh
+. "${SWRMGR_ROOT}/lib/core.sh"
+
+tower="${1:-}"
+func="${2:-}"
+
+[[ -n "${tower}" ]] || {
+  echo "Usage: swrmgr <tower> <function> [arguments...]"
+  echo ""
+  echo "Core towers: aws | stack | system"
+  echo ""
+  # List plugin towers
+  for d in $(list_plugins); do
+    t="$(plugin_tower "${d}")"
+    n="$(plugin_conf_get "${d}" PLUGIN_DESCRIPTION)"
+    [[ -n "${t}" ]] && echo "Plugin tower: ${t} — ${n}"
+  done
+  exit 1
+}
+
+[[ -n "${func}" ]] || {
+  echo "No function specified for tower: ${tower}"
+  echo ""
+  echo "Usage: swrmgr ${tower} <function> [arguments...]"
+  exit 1
+}
+
+# --------------------------------------------------------------------------
+# Resolve tower: core first, then plugins
+# --------------------------------------------------------------------------
+bin_path=""
+
+# Check core towers
+if [[ -f "${SWRMGR_ROOT}/bin/${tower}/${func}" ]]; then
+  bin_path="${SWRMGR_ROOT}/bin/${tower}/${func}"
+else
+  # Check plugin towers
+  plugin_dir="$(resolve_plugin_tower "${tower}" 2>/dev/null || true)"
+  if [[ -n "${plugin_dir}" && -f "${plugin_dir}bin/${func}" ]]; then
+    bin_path="${plugin_dir}bin/${func}"
+  fi
+fi
+
+# If still not found, show available functions
+if [[ -z "${bin_path}" ]]; then
+  echo "Unknown function: swrmgr ${tower} ${func}"
+  echo ""
+  echo "Available functions for '${tower}':"
+
+  # Core functions (exclude _ prefixed)
+  if [[ -d "${SWRMGR_ROOT}/bin/${tower}" ]]; then
+    find "${SWRMGR_ROOT}/bin/${tower}" -maxdepth 1 -type f -exec basename {} \; | grep -v '^_' | sort | sed 's/^/  /'
+  fi
+
+  # Plugin functions (exclude _ prefixed)
+  plugin_dir="$(resolve_plugin_tower "${tower}" 2>/dev/null || true)"
+  if [[ -n "${plugin_dir}" && -d "${plugin_dir}bin/" ]]; then
+    find "${plugin_dir}bin/" -maxdepth 1 -type f -exec basename {} \; | grep -v '^_' | sort | sed 's/^/  /'
+  fi
+
+  exit 1
+fi
+
+# --------------------------------------------------------------------------
+# Initialize environment
+# --------------------------------------------------------------------------
+shift 2
+
+# Source site configuration
+set -a
+[[ -f /etc/environment ]] && . /etc/environment
+set +a
+
+# Docker context
+docker context use default > /dev/null 2>&1 || true
+
+# ECR login (only when needed)
+if [[ -n "${SWRMGR_ECR_REGISTRY:-}" ]]; then
+  aws ecr get-login-password --region "${SWRMGR_AWS_REGION:-us-east-1}" \
+    | docker login --username AWS --password-stdin "${SWRMGR_ECR_REGISTRY}" >/dev/null 2>&1 || true
+fi
+
+# Move to working directory
+cd /var/www/html 2>/dev/null || true
+
+# --------------------------------------------------------------------------
+# Handle --help
+# --------------------------------------------------------------------------
+for arg in "$@"; do
+  if [[ "${arg}" == "--help" || "${arg}" == "-h" ]]; then
+    # Source the script and call _usage if it exists
+    (
+      . "${bin_path}" --source-only 2>/dev/null || true
+      if declare -f _usage > /dev/null 2>&1; then
+        _usage
+      else
+        echo "No help available for: swrmgr ${tower} ${func}"
+      fi
+    )
+    exit 0
+  fi
+done
+
+# Audit log
+audit_log "${tower}" "${func}" "$@"
+
+# --------------------------------------------------------------------------
+# Execute
+# --------------------------------------------------------------------------
+exec "${bin_path}" "$@"

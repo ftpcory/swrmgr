@@ -1,0 +1,39 @@
+# /etc/environment — swrmgr site configuration
+# These values are sourced by the dispatcher on every invocation.
+
+# Required
+SWRMGR_AWS_ACCOUNT_ID=123456789012
+SWRMGR_AWS_REGION=us-east-1
+SWRMGR_ECR_REGISTRY=123456789012.dkr.ecr.us-east-1.amazonaws.com
+SWRMGR_S3_BUCKET=my-customer-bucket
+
+# Stack directory (where stack folders live)
+SWRMGR_STACKS_DIR=/var/www/html
+
+# DNS (optional — skip if not using Route53)
+PUBLIC_DNS_ZONE_ID=Z0123456789ABCDEF
+PRIVATE_DNS_ZONE_ID=Z9876543210FEDCBA
+PRIVATE_DNS_ZONE_NAME=internal.example.com
+
+# SSH
+NODE_SSH_KEY_NAME=swarm-worker-key.pem
+
+# Tuning
+SWRMGR_MAX_PARALLEL=10
+SWRMGR_CREATE_WAIT=120
+
+# IAM
+SWRMGR_IAM_PREFIX=swrmgr
+SWRMGR_IAM_GROUP=swrmgr-customer
+
+# S3 folder structure for new stacks (space-separated)
+SWRMGR_S3_FOLDERS="uploads documents backups"
+
+# Shared secrets prefix in Secrets Manager
+SWRMGR_SHARED_SECRETS_PREFIX=swrmgr/shared
+
+# Env keys to strip before saving to Secrets Manager (pipe-separated regex)
+SWRMGR_SHARED_ENV_FILTER="SENTRY_|SMTP_|MAIL_"
+
+# Required env keys for validation (space-separated)
+SWRMGR_REQUIRED_ENV_KEYS="AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY MARIADB_ROOT_PASSWORD MARIADB_PASSWORD DATABASE_EXPOSE_PORT DATABASE_NODE"

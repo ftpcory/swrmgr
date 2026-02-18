@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+result="$(docker node ls --format '{{.Hostname}} {{.ManagerStatus}}' \
+  | grep -i -v 'leader' \
+  | grep -i 'worker' \
+  | shuf -n1 \
+  | awk '{print $1}')"
+
+[[ -n "${result}" ]] || result="$(hostname)"
+
+echo "${result}"

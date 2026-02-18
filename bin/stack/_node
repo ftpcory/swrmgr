@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+set -euo pipefail
+. "${SWRMGR_ROOT:-/opt/swrmgr}/lib/core.sh"
+
+stack="$(stack_name "${1}")"
+service="${2}"
+
+[[ -n "${stack}" && -n "${service}" ]] || {
+  echo "usage: swrmgr stack node <stack> <service>" >&2
+  exit 1
+}
+
+docker stack ps \
+  --filter desired-state=running \
+  --filter "name=${stack}_${service}" "${stack}" \
+  --format '{{.Node}}' | head -n 1

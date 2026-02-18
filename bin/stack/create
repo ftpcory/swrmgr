@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+set -euo pipefail
+. "${SWRMGR_ROOT:-/opt/swrmgr}/lib/core.sh"
+
+# ------------------------------------------------------------------------------
+# Usage — displayed when the --help flag is provided
+# ------------------------------------------------------------------------------
+_usage() {
+  cat <<EOF
+Usage: swrmgr stack create <stack-name> [customer name]
+
+Full provisioning pipeline for a new stack. Runs init, up, waits for
+services to start, fires post-create hooks, and registers DNS records.
+
+Arguments:
+  stack-name      Name of the stack to create
+  customer name   Optional display name for the customer
+
+Example:
+  swrmgr stack create acme-corp "Acme Corporation"
+EOF
+}
+
+# ------------------------------------------------------------------------------
+# Bail out if sourced for --help
+# ------------------------------------------------------------------------------
+[[ "${1:-}" == "--source-only" ]] && return 0 2>/dev/null || true
+
+stack="$(stack_name "${1}")"
+shift 1
+name="${*:-${stack}}"
+
+run_hooks "stack:create:before" "${stack}" "${name}"
+
+swrmgr stack init "${stack}"
+swrmgr stack up "${stack}"
+
+# Wait for services to start
+echo "Waiting for stack to start up..."
+init="${SECONDS}"
+while (( SECONDS - init < ${SWRMGR_CREATE_WAIT:-120} )); do
+  sleep 1
+done
+
+run_hooks "stack:create:after" "${stack}" "${name}"
+
+# DNS registration
+swrmgr aws dns-create "${stack}"

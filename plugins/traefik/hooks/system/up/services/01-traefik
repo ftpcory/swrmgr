@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Hook: system:up:services
+# Starts Traefik before customer stacks
+set -euo pipefail
+
+echo "Starting Traefik..."
+swrmgr traefik up

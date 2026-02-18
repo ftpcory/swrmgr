@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+set -euo pipefail
+. "${SWRMGR_ROOT:-/opt/swrmgr}/lib/core.sh"
+
+stack="$(stack_name "${1}")"
+service="${2}"
+
+[[ -n "${stack}" && -n "${service}" ]] || {
+  echo "usage: swrmgr stack container <stack> <service>" >&2
+  exit 1
+}
+
+KEY_FILE="${SWRMGR_SSH_KEY:-/home/ubuntu/.ssh/${NODE_SSH_KEY_NAME}}"
+
+node="$(swrmgr stack _node "${stack}" "${service}")"
+[[ -n "${node}" ]] || { echo "could not determine node for ${stack}_${service}" >&2; exit 1; }
+
+ssh -i "${KEY_FILE}" "${node}" \
+  docker ps --filter "name=${stack}_${service}" --format '{{.ID}}' | head -n 1

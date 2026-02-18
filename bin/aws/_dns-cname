@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+short="$(hostname | sed -e 's/-manager.*//g')"
+
+aws --region "${SWRMGR_AWS_REGION:-us-east-1}" elbv2 describe-load-balancers \
+  --query 'LoadBalancers[*].DNSName' \
+  | jq -r '.[]' \
+  | grep "${short}"

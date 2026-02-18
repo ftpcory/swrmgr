@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+set -euo pipefail
+. "${SWRMGR_ROOT:-/opt/swrmgr}/lib/core.sh"
+
+[[ -n "${1:-}" ]] || { echo "no username provided. exiting"; exit 1; }
+
+user="${1}"
+iam_prefix="${SWRMGR_IAM_PREFIX:-swrmgr}"
+bucket="${SWRMGR_S3_BUCKET:?SWRMGR_S3_BUCKET is not set}"
+aws_account_id="${SWRMGR_AWS_ACCOUNT_ID:?SWRMGR_AWS_ACCOUNT_ID is not set}"
+iam_group="${SWRMGR_IAM_GROUP:-swrmgr-customer}"
+
+# Check if user already exists
+if aws iam get-user --user-name "${iam_prefix}-${user}" > /dev/null 2>&1; then
+  echo "User: ${user} already exists."
+  exit 0
+fi
+
+# Create IAM policy
+swrmgr aws _policy-create "${user}"
+
+# Create user and attach policies
+aws iam create-user --user-name "${iam_prefix}-${user}" --tags "Key=stack,Value=${user}" > /dev/null 2>&1 || true
+aws iam attach-user-policy --user-name "${iam_prefix}-${user}" \
+  --policy-arn "arn:aws:iam::${aws_account_id}:policy/${iam_prefix}-iam-policy-${user}"
+aws iam create-access-key --user-name "${iam_prefix}-${user}" > "/etc/swrmgr/${user}.json"
+aws iam add-user-to-group --user-name "${iam_prefix}-${user}" --group-name "${iam_group}"
+
+# Create S3 folder structure
+touch .empty
+for folder in ${SWRMGR_S3_FOLDERS:-}; do
+  aws s3 cp .empty "s3://${bucket}/${user}/${folder}/.empty"
+done
+rm -f .empty

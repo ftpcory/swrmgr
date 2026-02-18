@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -euo pipefail
+. "${SWRMGR_ROOT:-/opt/swrmgr}/lib/core.sh"
+
+stack="$(stack_name "${1}")"
+KEY_FILE="${SWRMGR_SSH_KEY:-/home/ubuntu/.ssh/${NODE_SSH_KEY_NAME}}"
+
+while read -r node; do
+  echo "${node}"
+  ssh -n -i "${KEY_FILE}" "ubuntu@${node}" \
+    "docker volume rm ${stack}_dbtmp ${stack}_dbdata || true 2>&1" || true 2>&1
+done <<< "$(docker node ls --format '{{.Hostname}}')"

@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+set -euo pipefail
+. "${SWRMGR_ROOT:-/opt/swrmgr}/lib/core.sh"
+
+stack="$(stack_name "${1}")"
+email="${2:-}"
+domain="$(stack_domain "${stack}")"
+url="https://${domain}"
+
+bw sync > /dev/null 2>&1
+
+if [[ -n "${email}" ]]; then
+  bw list items --url "${url}" \
+    | jq ".[] | select(.login.username == \"${email}\")" \
+    | head -1
+else
+  bw list items --url "${url}" | jq '.[0]'
+fi

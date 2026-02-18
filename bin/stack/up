@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+set -euo pipefail
+. "${SWRMGR_ROOT:-/opt/swrmgr}/lib/core.sh"
+
+# ------------------------------------------------------------------------------
+# Usage — displayed when the --help flag is provided
+# ------------------------------------------------------------------------------
+_usage() {
+  cat <<EOF
+Usage: swrmgr stack up <stack-name>
+
+Deploy or update a stack. Retrieves secrets from Secrets Manager, generates
+the stack YAML via envsubst, pulls images, and runs docker stack deploy.
+Also updates private DNS for the database service.
+
+Arguments:
+  stack-name    Name of the stack to deploy
+
+Example:
+  swrmgr stack up acme-corp
+EOF
+}
+
+# ------------------------------------------------------------------------------
+# Bail out if sourced for --help
+# ------------------------------------------------------------------------------
+[[ "${1:-}" == "--source-only" ]] && return 0 2>/dev/null || true
+
+stack="$(stack_name "${1}")"
+folder="$(stack_path "${stack}")"
+
+cd "${folder}" || exit 1
+
+run_hooks "stack:up:before" "${stack}"
+
+# Retrieve secrets and create the .env file
+swrmgr stack env-retrieve "${stack}"
+
+# Generate the stack YAML
+swrmgr stack yaml-generate "${stack}"
+
+# Pull images and deploy
+docker compose -f stack.yml pull --quiet
+docker stack deploy -c stack.yml --with-registry-auth --prune --detach=true "${stack}"
+
+# Update private DNS for the database service
+node="$(swrmgr stack env-get "${stack}" "database_node")"
+if [[ -n "${PRIVATE_DNS_ZONE_ID:-}" && -n "${PRIVATE_DNS_ZONE_NAME:-}" ]]; then
+  aws route53 change-resource-record-sets \
+    --region "${SWRMGR_AWS_REGION:-us-east-1}" \
+    --hosted-zone-id "${PRIVATE_DNS_ZONE_ID}" \
+    --change-batch "$(swrmgr aws _dns-changeset "${stack}-db.${PRIVATE_DNS_ZONE_NAME}" "${node}" "UPSERT")" &
+fi
+
+# Validate environment
+swrmgr stack env-test "${stack}"
+
+# Cleanup temporary files
+swrmgr stack _env-cleanup "${stack}" &
+
+run_hooks "stack:up:after" "${stack}"

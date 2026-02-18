@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+set -euo pipefail
+. "${SWRMGR_ROOT:-/opt/swrmgr}/lib/core.sh"
+
+traefik_dir="${SWRMGR_TRAEFIK_DIR:-/opt/swrmgr/plugins/traefik/etc}"
+
+cd "${traefik_dir}" || exit 1
+
+swrmgr traefik yaml-generate > stack.yml
+docker stack deploy -c stack.yml --prune --with-registry-auth --detach=true traefik
