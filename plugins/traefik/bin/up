@@ -2,7 +2,7 @@
 set -euo pipefail
 . "${SWRMGR_ROOT:-/opt/swrmgr}/lib/core.sh"
 
-traefik_dir="${SWRMGR_TRAEFIK_DIR:-/opt/swrmgr/plugins/traefik/etc}"
+traefik_dir="${SWRMGR_TRAEFIK_DIR:-/opt/swrmgr/plugins/traefik}"
 
 cd "${traefik_dir}" || exit 1
 
