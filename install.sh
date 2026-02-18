@@ -5,6 +5,43 @@ INSTALL_ROOT="${SWRMGR_ROOT:-/opt/swrmgr}"
 CONFIG_DIR="${SWRMGR_CONFIG_DIR:-/etc/swrmgr}"
 LOG_DIR="/var/log/swrmgr"
 
+# ------------------------------------------------------------------------------
+# Prerequisites
+# ------------------------------------------------------------------------------
+echo "Checking prerequisites..."
+
+# Required commands
+missing=()
+for cmd in docker aws jq curl rsync openssl envsubst mysql; do
+  command -v "${cmd}" > /dev/null 2>&1 || missing+=("${cmd}")
+done
+
+if (( ${#missing[@]} > 0 )); then
+  echo "Missing required commands: ${missing[*]}" >&2
+  echo "Install them and try again." >&2
+  exit 1
+fi
+
+# Docker must be running
+docker info > /dev/null 2>&1 || {
+  echo "Docker is not running." >&2
+  exit 1
+}
+
+# Must be a swarm manager
+node_role="$(docker info --format '{{.Swarm.ControlAvailable}}' 2>/dev/null || echo "false")"
+if [[ "${node_role}" != "true" ]]; then
+  echo "This node is not a Docker Swarm manager." >&2
+  echo "Run 'docker swarm init' or join as a manager first." >&2
+  exit 1
+fi
+
+echo "All prerequisites met."
+echo ""
+
+# ------------------------------------------------------------------------------
+# Install
+# ------------------------------------------------------------------------------
 echo "Installing swrmgr to ${INSTALL_ROOT}..."
 
 # Create directories
@@ -38,7 +75,7 @@ sudo cp "${INSTALL_ROOT}/bin/swrmgr" /usr/local/bin/swrmgr
 sudo chmod +x /usr/local/bin/swrmgr
 
 # Copy example config if no config exists
-if [[ ! -f /etc/environment ]] || ! grep -q 'SWRMGR_BASE_DOMAIN' /etc/environment; then
+if [[ ! -f /etc/environment ]] || ! grep -q 'SWRMGR_AWS_ACCOUNT_ID' /etc/environment; then
   echo ""
   echo "No swrmgr configuration found in /etc/environment."
   echo "See ${INSTALL_ROOT}/etc/environment.example for required variables."
@@ -55,7 +92,6 @@ if [[ ! -f /etc/environment ]] || ! grep -q 'SWRMGR_BASE_DOMAIN' /etc/environmen
       echo "${name}=${value}" | sudo tee -a /etc/environment > /dev/null
     }
 
-    configure_var SWRMGR_BASE_DOMAIN "example.com" "Base domain"
     configure_var SWRMGR_AWS_ACCOUNT_ID "" "AWS Account ID"
     configure_var SWRMGR_AWS_REGION "us-east-1" "AWS Region"
     configure_var SWRMGR_S3_BUCKET "" "S3 bucket for customer data"

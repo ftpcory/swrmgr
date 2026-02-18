@@ -7,7 +7,7 @@ set -euo pipefail
 # ------------------------------------------------------------------------------
 _usage() {
   cat <<EOF
-Usage: swarm-mgr stack env-generate <stack-name>
+Usage: swrmgr stack env-generate <stack-name>
 
 Generate a .env file for a new stack. Customize etc/template.env to
 define your application's environment variables.
@@ -16,7 +16,7 @@ Arguments:
   stack-name    Name of the stack
 
 Example:
-  swarm-mgr stack env-generate acme-corp
+  swrmgr stack env-generate acme-corp
 EOF
 }
 
