@@ -33,6 +33,10 @@ IMG_TAG="stable"
 [[ -d "${folder}" ]] || { echo "the environment provided doesn't exist"; exit 1; }
 
 cd "${folder}" || exit 1
+
+# Skip if stack.yml already exists
+[[ -f stack.yml ]] && exit 0
+
 touch stack.yml
 
 # Source env values (excluding AWS credentials)
