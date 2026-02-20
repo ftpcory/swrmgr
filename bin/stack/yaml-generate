@@ -40,9 +40,7 @@ cd "${folder}" || exit 1
 touch stack.yml
 
 # Source env values (excluding AWS credentials)
-set -a
-source <(grep -i -v -E 'AWS_' .env)
-set +a
+env_load_file ".env" "" "^AWS_"
 
 # Mandatory variables
 : "${DATABASE_NODE:?DATABASE_NODE is not set}"

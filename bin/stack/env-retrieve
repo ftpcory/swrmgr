@@ -55,7 +55,5 @@ done
 swrmgr stack _env-convert-to-env "${stack}"
 
 # Append shared secrets if configured
-set -a
-source <(grep -i -E 'IMG_TAG' .env)
-set +a
+env_load_file ".env" "IMG_TAG"
 swrmgr stack _env-shared "${IMG_TAG:-stable}" >> .env
