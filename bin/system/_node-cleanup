@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# local prune
+docker system prune -f -a
+
+# clean up dangling volumes (preserve database volumes)
+while read -r volume; do
+  [[ -z "${volume}" ]] && continue
+  docker volume rm "${volume}" || true 2>&1
+done <<< "$(docker volume ls --format '{{.Name}}' --filter dangling=true | grep -E -v 'dbdata')"
+
+# Ensure docker_gwbridge stays off overlay subnets
+gwbridge_addr=$(ip addr show docker_gwbridge 2>/dev/null | awk '/inet /{print $2}')
+if [[ "${gwbridge_addr}" =~ ^172\.2[01]\. ]]; then
+  echo "WARNING: docker_gwbridge is on overlay subnet ${gwbridge_addr} - fixing"
+  docker network disconnect -f docker_gwbridge gateway_ingress-sbox 2>/dev/null || true
+  docker network rm docker_gwbridge 2>/dev/null || true
+  sudo ip link set docker_gwbridge down 2>/dev/null || true
+  sudo ip link delete docker_gwbridge 2>/dev/null || true
+  docker network create \
+    --driver bridge \
+    --subnet 192.168.254.0/24 \
+    --gateway 192.168.254.1 \
+    -o com.docker.network.bridge.name=docker_gwbridge \
+    docker_gwbridge
+fi
+
+# stop docker
+sudo systemctl stop docker
+
+# cleanup any lingering network devices (vxlan interfaces)
+while read -r device; do
+  [[ -z "${device}" ]] && continue
+  echo "Removing vxlan device: ${device}"
+  sudo ip link delete "${device}" 2>/dev/null || true
+done <<< "$(ls /sys/class/net/ | grep vx)"
+
+# cleanup docker0 and docker_gwbridge if they've grabbed overlay subnets
+for iface in docker0 docker_gwbridge; do
+  while read -r addr; do
+    [[ -z "${addr}" ]] && continue
+    if [[ "${addr}" =~ ^172\.2[01]\. ]]; then
+      echo "Removing conflicting address ${addr} from ${iface}"
+      sudo ip addr del "${addr}" dev "${iface}" 2>/dev/null || true
+    fi
+  done <<< "$(ip addr show "${iface}" 2>/dev/null | awk '/inet /{print $2}')"
+  sudo ip link set "${iface}" down 2>/dev/null || true
+done
+
+# clean up leaked network state files (Docker IPAM leak bug)
+sudo find /var/lib/docker/network/files/ -mindepth 1 \
+  ! -name "resolv.conf" \
+  ! -name "resolv.conf.hash" \
+  ! -name "hosts" \
+  -delete 2>/dev/null || true
+
+# clean up stale overlay network namespaces
+while read -r ns; do
+  [[ -z "${ns}" ]] && continue
+  sudo umount "${ns}" 2>/dev/null || true
+  sudo rm -f "${ns}"
+done <<< "$(find /var/run/docker/netns/ -name '1-*' 2>/dev/null)"
+
+# restart docker
+sudo systemctl start docker
