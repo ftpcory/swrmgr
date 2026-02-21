@@ -1,0 +1,44 @@
+# bin/system/cleanup
+#!/usr/bin/env bash
+set -euo pipefail
+. "${SWARM_MGR_ROOT:-/opt/swrmgr}/lib/core.sh"
+
+# ------------------------------------------------------------------------------
+# Usage — displayed when the --help flag is provided
+# ------------------------------------------------------------------------------
+_usage() {
+  cat <<EOF
+Usage: swrmgr system cleanup
+
+Run garbage collection on all swarm nodes. Prunes images, removes
+dangling volumes, fixes overlay subnet conflicts, and cleans up
+stale network state. Stops and restarts Docker on each node.
+
+Example:
+  swrmgr system cleanup
+EOF
+}
+
+# ------------------------------------------------------------------------------
+# Bail out if sourced for --help
+# ------------------------------------------------------------------------------
+[[ "${1:-}" == "--source-only" ]] && return 0 2>/dev/null || true
+
+run_hooks "system:cleanup:before"
+
+KEY_FILE="${SWARM_MGR_SSH_KEY:-/home/ubuntu/.ssh/${NODE_SSH_KEY_NAME}}"
+cleanup_script="${SWARM_MGR_ROOT}/bin/system/_node-cleanup"
+
+# Run on the manager first
+echo "Cleaning up $(hostname)..."
+bash "${cleanup_script}"
+
+# Then SSH to each worker
+while read -r node; do
+  [[ -z "${node}" ]] && continue
+  [[ "${node}" == "$(hostname)" ]] && continue
+  echo "Cleaning up ${node}..."
+  ssh -i "${KEY_FILE}" "ubuntu@${node}" "bash -s" < "${cleanup_script}"
+done <<< "$(swrmgr system node-list)"
+
+run_hooks "system:cleanup:after"
