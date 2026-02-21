@@ -1,80 +1,90 @@
 #!/usr/bin/env bash
-set -euo pipefail
-. "${SWRMGR_ROOT:-/opt/swrmgr}/lib/core.sh"
+ set -euo pipefail
+ . "${SWRMGR_ROOT:-/opt/swrmgr}/lib/core.sh"
 
-# ------------------------------------------------------------------------------
-# Usage — displayed when the --help flag is provided
-# ------------------------------------------------------------------------------
-_usage() {
-  cat <<EOF
-Usage: swrmgr stack backup-create <stack-name> [hold]
+ # ------------------------------------------------------------------------------
+ # Usage — displayed when the --help flag is provided
+ # ------------------------------------------------------------------------------
+ _usage() {
+   cat <<EOF
+ Usage: swrmgr stack backup-create <stack-name> [hold]
 
-Create an encrypted backup of the stack's database volume and upload
-to S3. Stops the stack during the backup process and brings it back
-up afterward unless "hold" is specified.
+ Create an encrypted backup of the stack's database volume and upload
+ to S3. Stops the stack during the backup process and brings it back
+ up afterward unless "hold" is specified.
 
-Arguments:
-  stack-name    Name of the stack to backup
-  hold          Optional — keep stack down after backup
+ Arguments:
+   stack-name    Name of the stack to backup
+   hold          Optional — keep stack down after backup
 
-Example:
-  swrmgr stack backup-create acme-corp
-  swrmgr stack backup-create acme-corp hold
-EOF
-}
+ Example:
+   swrmgr stack backup-create acme-corp
+   swrmgr stack backup-create acme-corp hold
+ EOF
+ }
 
-# ------------------------------------------------------------------------------
-# Bail out if sourced for --help
-# ------------------------------------------------------------------------------
-[[ "${1:-}" == "--source-only" ]] && return 0 2>/dev/null || true
+ # ------------------------------------------------------------------------------
+ # Bail out if sourced for --help
+ # ------------------------------------------------------------------------------
+ [[ "${1:-}" == "--source-only" ]] && return 0 2>/dev/null || true
 
-stack="$(stack_name "${1}")"
-folder="$(stack_path "${stack}")"
-hold="${2:-}"
+ stack="$(stack_name "${1}")"
+ folder="$(stack_path "${stack}")"
+ hold="${2:-}"
 
-cd "${folder}" || exit 1
+ cd "${folder}" || exit 1
 
-node="$(swrmgr stack env-get "${stack}" database_node)"
-pass="$(swrmgr stack env-get "${stack}" mariadb_root_password)"
-file="${stack}_dbdata"
-domain="$(stack_domain "${stack}")"
-host="$(hostname)"
-timestamp="$(date +%s)"
-bucket="${SWRMGR_S3_BUCKET:?SWRMGR_S3_BUCKET is not set}"
+ node="$(swrmgr stack env-get "${stack}" database_node)"
+ pass="$(swrmgr stack env-get "${stack}" mariadb_root_password)"
+ file="${stack}_dbdata"
+ domain="$(stack_domain "${stack}")"
+ host="$(hostname)"
+ timestamp="$(date +%s)"
+ bucket="${SWRMGR_S3_BUCKET:?SWRMGR_S3_BUCKET is not set}"
 
-[[ -n "${node}" ]] || exit 1
+ [[ -n "${node}" ]] || exit 1
 
-run_hooks "stack:backup:before" "${stack}"
+ stack_was_brought_down=0
+ cleanup() {
+   local ec=$?
+   rm -rf "${file}"* >/dev/null 2>&1 || true
+   if [[ -z "${hold}" && "${stack_was_brought_down}" -eq 1 ]]; then
+     swrmgr stack up "${stack}" || true
+   fi
+   exit "$ec"
+ }
+ trap cleanup EXIT
 
-echo "${stack}"
-echo "${node}"
-mkdir -p "${file}"
+ run_hooks "stack:backup:before" "${stack}"
 
-# Bring the stack down
-swrmgr stack down "${stack}"
-sleep 10
+ echo "${stack}"
+ echo "${node}"
+ mkdir -p "${file}"
 
-# Copy volume data from the database node
-ssh -n "${node}" sudo tar czf - -C "/var/lib/docker/volumes/${file}" . | tar xzf - -C "${file}"
+ # Bring the stack down
+ swrmgr stack down "${stack}"
+ sleep 10
+ stack_was_brought_down=1
 
-# Encrypt and upload to S3
-tar -czf - -C "${file}" . | openssl enc -aes-256-cbc -salt -pbkdf2 -pass pass:"${pass}" -out "${file}.tar.gz.enc"
+ # Copy volume data from the database node
+ ssh -n "${node}" sudo tar czf - -C "/var/lib/docker/volumes/${file}" . | tar xzf - -C "${file}"
 
-aws s3api put-object \
-  --bucket "${bucket}" \
-  --key "${stack}/backups/${timestamp}-${file}.tar.gz.enc" \
-  --body "${file}.tar.gz.enc" \
-  --tagging "cold-backup=true&stack=${stack}&domain=${domain}&path=${folder}&host=${host}"
+ # Encrypt and upload to S3
+ tar -czf - -C "${file}" . | openssl enc -aes-256-cbc -salt -pbkdf2 -pass pass:"${pass}" -out "${file}.tar.gz.enc"
 
-if [[ $? -ne 0 ]]; then
-  rm -rf "${file}"* >/dev/null 2>&1
-  echo "Failed to upload backup to S3" >&2
-  exit 2
-fi
+ if ! aws s3api put-object \
+   --bucket "${bucket}" \
+   --key "${stack}/backups/${timestamp}-${file}.tar.gz.enc" \
+   --body "${file}.tar.gz.enc" \
+   --tagging "cold-backup=true&stack=${stack}&domain=${domain}&path=${folder}&host=${host}"; then
+   echo "Failed to upload backup to S3" >&2
+   exit 2
+ fi
 
-# Bring stack back up unless hold flag is set
-[[ -z "${hold}" ]] && swrmgr stack up "${stack}"
+ # Bring stack back up unless hold flag is set
+ [[ -z "${hold}" ]] && swrmgr stack up "${stack}"
 
-rm -rf "${file}"* >/dev/null 2>&1
+ rm -rf "${file}"* >/dev/null 2>&1
+ trap - EXIT
 
-run_hooks "stack:backup:after" "${stack}"
+ run_hooks "stack:backup:after" "${stack}"

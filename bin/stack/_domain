@@ -1,6 +1,0 @@
-#!/usr/bin/env bash
-set -euo pipefail
-. "${SWRMGR_ROOT:-/opt/swrmgr}/lib/core.sh"
-
-stack="$(stack_name "${1}")"
-stack_domain "${stack}"

@@ -53,7 +53,7 @@ cd "${project_root}" || exit 1
 
 # Copy initial env template if needed
 [[ -f .env ]] || {
-  [[ -f "${SWRMGR_ROOT}/etc/init.env" ]] && cp "${SWRMGR_ROOT}/etc/init.env" .env
+  [[ -f "${SWRMGR_ROOT}/etc/stack.env" ]] && cp "${SWRMGR_ROOT}/etc/stack.env" .env
 }
 
 # Initialize AWS resources

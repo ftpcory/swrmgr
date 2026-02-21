@@ -33,12 +33,14 @@ IMG_TAG="stable"
 [[ -d "${folder}" ]] || { echo "the environment provided doesn't exist"; exit 1; }
 
 cd "${folder}" || exit 1
+
+# Skip if stack.yml already exists
+[[ -f stack.yml ]] && exit 0
+
 touch stack.yml
 
 # Source env values (excluding AWS credentials)
-set -a
-source <(grep -i -v -E 'AWS_' .env)
-set +a
+env_load_file ".env" "" "^AWS_"
 
 # Mandatory variables
 : "${DATABASE_NODE:?DATABASE_NODE is not set}"

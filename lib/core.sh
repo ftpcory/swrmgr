@@ -136,3 +136,56 @@ stack_domain() {
     echo "${stack}"
   fi
 }
+
+# Load variables from an env file safely (no eval, no expansion, no export).
+# Usage:
+#   env_load_file ".env" "^IMG_TAG$"
+#   env_load_file ".env" "" "^AWS_"
+env_load_file() {
+  local file="${1:-}"
+  local include_re="${2:-}"
+  local exclude_re="${3:-}"
+
+  [[ -f "${file}" ]] || { echo "env_load_file: missing file ${file}" >&2; return 1; }
+
+  local line key val
+  while IFS= read -r line || [[ -n "${line}" ]]; do
+    # Trim CR and skip blank lines / comments
+    line="${line%$'\r'}"
+    [[ -z "${line}" ]] && continue
+    [[ "${line}" =~ ^[[:space:]]*# ]] && continue
+
+    # Drop leading "export "
+    line="${line#[[:space:]]export[[:space:]]}"
+
+    # Split on first '='
+    key="${line%%=*}"
+    val="${line#*=}"
+
+    # Trim whitespace around key
+    key="$(printf '%s' "${key}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+
+    # Only accept valid shell identifiers
+    [[ "${key}" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
+
+    # Apply include / exclude filters if provided
+    if [[ -n "${include_re}" ]] && ! [[ "${key}" =~ ${include_re} ]]; then
+      continue
+    fi
+    if [[ -n "${exclude_re}" ]] && [[ "${key}" =~ ${exclude_re} ]]; then
+      continue
+    fi
+
+    # Trim whitespace around value
+    val="$(printf '%s' "${val}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+
+    # Strip matching quotes
+    if [[ "${val}" =~ ^\".*\"$ ]]; then
+      val="${val:1:${#val}-2}"
+    elif [[ "${val}" =~ ^\'.*\'$ ]]; then
+      val="${val:1:${#val}-2}"
+    fi
+
+    printf -v "${key}" '%s' "${val}"
+  done < "${file}"
+}
