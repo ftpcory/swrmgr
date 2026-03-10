@@ -24,7 +24,7 @@ services:
       labels:
         - "traefik.enable=false"
       placement:
-        constraints: [node.hostname == ${DATABASE_NODE}]
+        constraints: [${DB_PLACEMENT_CONSTRAINT}]
 
   # Example application service
   app:
@@ -39,7 +39,7 @@ services:
         order: start-first
         failure_action: rollback
       placement:
-        constraints: [node.role == worker]
+        constraints: [${APP_PLACEMENT_CONSTRAINT}]
       labels:
         - "traefik.enable=true"
         - "traefik.docker.network=traefik-public-${stack}"
@@ -53,5 +53,5 @@ volumes:
 networks:
   internal:
     driver: overlay
-  traefik-public-${stack}:
+  traefik-public-${stack_safe}:
     external: true

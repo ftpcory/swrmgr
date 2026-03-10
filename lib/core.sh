@@ -83,14 +83,15 @@ run_hooks() {
     done
   done
 
-  # Sort by basename (numeric prefix) and execute
   if (( ${#scripts[@]} > 0 )); then
-    local sorted
-    sorted="$(printf '%s\n' "${scripts[@]}" | sort -t/ -k"$(printf '%s\n' "${scripts[0]}" | tr '/' '\n' | wc -l)" -n)"
     while IFS= read -r script; do
       [[ -n "${script}" ]] || continue
       "${script}" "$@"
-    done <<< "${sorted}"
+    done <<< "$(
+      for s in "${scripts[@]}"; do
+        echo "$(basename "${s}") ${s}"
+      done | sort -n | awk '{print $2}'
+    )"
   fi
 }
 
@@ -99,9 +100,9 @@ run_hooks() {
 # --------------------------------------------------------------------------
 validate_stack_name() {
   local name="${1}"
-  [[ "${name}" =~ ^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$ ]] || {
+  [[ "${name}" =~ ^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$ ]] || {
     echo "Invalid stack name: ${name}" >&2
-    echo "Must be 3-63 characters, lowercase alphanumeric and hyphens, start/end with alphanumeric." >&2
+    echo "Must be 3-63 characters, lowercase alphanumeric, hyphens, and dots, start/end with alphanumeric." >&2
     return 1
   }
 }
@@ -109,20 +110,49 @@ validate_stack_name() {
 # --------------------------------------------------------------------------
 # Stack path helpers
 # --------------------------------------------------------------------------
-stack_name() {
+# The raw stack identifier — can contain dots (it's the directory name)
+stack_id() {
   local raw="${1}"
   local name
   name="$(echo "${raw}" | sed -e 's|.*/||' | xargs)"
+  [[ -n "${name}" ]] || { echo "Empty stack name" >&2; return 1; }
+  echo "${name}"
+}
+
+# Docker-safe name — dots replaced with hyphens, validated
+stack_name() {
+  local id
+  id="$(stack_id "${1}")"
+  local name="${id//./-}"
   validate_stack_name "${name}" || exit 1
   echo "${name}"
 }
 
+stack_safe() {
+  local id
+  id="$(stack_id "${1}")"
+  echo "${id//./-}"
+}
+
 stack_path() {
-  local stack="${1}"
+  local input="${1}"
   local base="${SWRMGR_STACKS_DIR:-/var/www/html}"
-  local path="${base}/${stack}"
-  [[ -d "${path}" ]] || { echo "Stack path does not exist: ${path}" >&2; return 1; }
-  echo "${path}"
+
+  # Try exact match first
+  [[ -d "${base}/${input}" ]] && echo "${base}/${input}" && return 0
+
+  # Try finding a directory whose sanitized name matches
+  for d in "${base}"/*/; do
+    [[ -d "${d}" ]] || continue
+    dir="$(basename "${d}")"
+    if [[ "${dir//./-}" == "${input}" ]]; then
+      echo "${base}/${dir}"
+      return 0
+    fi
+  done
+
+  echo "Stack path does not exist: ${base}/${input}" >&2
+  return 1
 }
 
 stack_domain() {

@@ -3,4 +3,9 @@ set -euo pipefail
 
 base="${SWRMGR_STACKS_DIR:-/var/www/html}"
 
-find "${base}" -mindepth 1 -maxdepth 1 -type d -exec basename {} \; | sort
+for d in "${base}"/*/; do
+  [[ -d "${d}" ]] || continue
+  [[ "${d}" == "${base}/*/" ]] && continue
+  [[ -f "${d}/.env" || -f "${d}/stack.yml" ]] || continue
+  basename "${d}"
+done | sort

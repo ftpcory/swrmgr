@@ -2,11 +2,11 @@
 set -euo pipefail
 
 result="$(docker node ls --format '{{.Hostname}} {{.ManagerStatus}}' \
-  | grep -i -v 'leader' \
-  | grep -i 'worker' \
-  | shuf -n1 \
-  | awk '{print $1}')"
+  | grep -v -i 'leader' \
+  | awk '{print $1}' \
+  | shuf -n1 || true)"
 
-[[ -n "${result}" ]] || result="$(hostname)"
+# Fallback to the first node in the swarm
+[[ -n "${result}" ]] || result="$(docker node ls --format '{{.Hostname}}' | head -1)"
 
 echo "${result}"

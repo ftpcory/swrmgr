@@ -72,5 +72,6 @@ create_overlay_with_subnet "traefik-public"
 # Per-stack networks
 while read -r stack; do
   [[ -n "${stack}" ]] || continue
-  create_overlay_with_subnet "traefik-public-${stack}"
+  safe="${stack//./-}"
+  create_overlay_with_subnet "traefik-public-${safe}"
 done <<< "$(swrmgr system stack-list)"

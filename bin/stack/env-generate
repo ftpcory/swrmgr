@@ -26,15 +26,51 @@ EOF
 [[ "${1:-}" == "--source-only" ]] && return 0 2>/dev/null || true
 
 stack="$(stack_name "${1}")"
+stack_raw="$(stack_id "${1}")"
 stacks_dir="${SWRMGR_STACKS_DIR:-/var/www/html}"
-folder="${stacks_dir}/${stack}"
+folder="${stacks_dir}/${stack_raw}"
 
 cd "${folder}" || exit 1
 
+# Start from template if available, otherwise create a minimal .env
 if [[ -f "${SWRMGR_ROOT}/etc/template.env" ]]; then
   cp "${SWRMGR_ROOT}/etc/template.env" .env
 else
   touch .env
 fi
+
+# Set a key only if it doesn't already exist in .env
+env_set_default() {
+  local key="${1}" value="${2}"
+  grep -q "^${key}=" .env 2>/dev/null || echo "${key}=${value}" >> .env
+}
+
+# Generate database values (only if not already set)
+env_set_default MARIADB_ROOT_PASSWORD "$(openssl rand -hex 32)"
+env_set_default MARIADB_PASSWORD "$(openssl rand -hex 32)"
+env_set_default MARIADB_DATABASE "${stack}"
+env_set_default MARIADB_USER "${stack}"
+env_set_default DATABASE_NODE "$(swrmgr system _node-random)"
+env_set_default DATABASE_EXPOSE_PORT "$(swrmgr system _port-get-next 2>/dev/null || echo 33060)"
+env_set_default STACK_DOMAIN "${stack_raw}"
+
+node_count="$(docker node ls --format '{{.Hostname}}' | wc -l | tr -d ' ')"
+if (( node_count == 1 )); then
+  env_set_default APP_PLACEMENT_CONSTRAINT "node.role == manager"
+else
+  env_set_default APP_PLACEMENT_CONSTRAINT "node.role == worker"
+fi
+
+# Inject IAM credentials (only if not already set)
+config_dir="${SWRMGR_CONFIG_DIR:-/etc/swrmgr}"
+iam_json="${config_dir}/${stack}.json"
+
+if [[ -f "${iam_json}" ]]; then
+  env_set_default AWS_ACCESS_KEY_ID "$(jq -r '.AccessKey.AccessKeyId' "${iam_json}")"
+  env_set_default AWS_SECRET_ACCESS_KEY "$(jq -r '.AccessKey.SecretAccessKey' "${iam_json}")"
+fi
+
+# Set STACK_DOMAIN to the raw directory name
+grep -q '^STACK_DOMAIN=' .env || echo "STACK_DOMAIN=${stack_raw}" >> .env
 
 run_hooks "stack:env-generate:after" "${stack}"

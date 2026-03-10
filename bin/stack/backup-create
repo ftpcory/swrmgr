@@ -1,90 +1,120 @@
 #!/usr/bin/env bash
- set -euo pipefail
- . "${SWRMGR_ROOT:-/opt/swrmgr}/lib/core.sh"
+set -euo pipefail
+. "${SWRMGR_ROOT:-/opt/swrmgr}/lib/core.sh"
 
- # ------------------------------------------------------------------------------
- # Usage — displayed when the --help flag is provided
- # ------------------------------------------------------------------------------
- _usage() {
-   cat <<EOF
- Usage: swrmgr stack backup-create <stack-name> [hold]
+# ------------------------------------------------------------------------------
+# Usage — displayed when the --help flag is provided
+# ------------------------------------------------------------------------------
+_usage() {
+  cat <<EOF
+Usage: swrmgr stack backup-create <stack-name> [--cold]
 
- Create an encrypted backup of the stack's database volume and upload
- to S3. Stops the stack during the backup process and brings it back
- up afterward unless "hold" is specified.
+Create an encrypted backup of the stack's database and upload to S3.
 
- Arguments:
-   stack-name    Name of the stack to backup
-   hold          Optional — keep stack down after backup
+By default performs a hot backup using mariadb-backup while the stack
+stays running. No downtime required.
 
- Example:
-   swrmgr stack backup-create acme-corp
-   swrmgr stack backup-create acme-corp hold
- EOF
- }
+With --cold, stops the stack first and copies the raw volume data.
+This is the legacy behavior and guarantees a fully quiesced filesystem.
 
- # ------------------------------------------------------------------------------
- # Bail out if sourced for --help
- # ------------------------------------------------------------------------------
- [[ "${1:-}" == "--source-only" ]] && return 0 2>/dev/null || true
+Arguments:
+  stack-name    Name of the stack to backup
 
- stack="$(stack_name "${1}")"
- folder="$(stack_path "${stack}")"
- hold="${2:-}"
+Options:
+  --cold        Stop the stack during backup (legacy mode)
 
- cd "${folder}" || exit 1
+Example:
+  swrmgr stack backup-create acme-corp
+  swrmgr stack backup-create acme-corp --cold
+EOF
+}
 
- node="$(swrmgr stack env-get "${stack}" database_node)"
- pass="$(swrmgr stack env-get "${stack}" mariadb_root_password)"
- file="${stack}_dbdata"
- domain="$(stack_domain "${stack}")"
- host="$(hostname)"
- timestamp="$(date +%s)"
- bucket="${SWRMGR_S3_BUCKET:?SWRMGR_S3_BUCKET is not set}"
+# ------------------------------------------------------------------------------
+# Bail out if sourced for --help
+# ------------------------------------------------------------------------------
+[[ "${1:-}" == "--source-only" ]] && return 0 2>/dev/null || true
 
- [[ -n "${node}" ]] || exit 1
+stack="$(stack_name "${1}")"
+mode="hot"
+[[ "${2:-}" == "--cold" ]] && mode="cold"
 
- stack_was_brought_down=0
- cleanup() {
-   local ec=$?
-   rm -rf "${file}"* >/dev/null 2>&1 || true
-   if [[ -z "${hold}" && "${stack_was_brought_down}" -eq 1 ]]; then
-     swrmgr stack up "${stack}" || true
-   fi
-   exit "$ec"
- }
- trap cleanup EXIT
+folder="$(stack_path "${stack}")"
+cd "${folder}" || exit 1
 
- run_hooks "stack:backup:before" "${stack}"
+pass="$(swrmgr stack env-get "${stack}" mariadb_root_password)"
+node="$(swrmgr stack env-get "${stack}" database_node)"
+domain="$(stack_domain "${stack}")"
+host="$(hostname)"
+timestamp="$(date +%s)"
+bucket="${SWRMGR_S3_BUCKET:?SWRMGR_S3_BUCKET is not set}"
+file="${stack}_dbdata"
 
- echo "${stack}"
- echo "${node}"
- mkdir -p "${file}"
+[[ -n "${node}" ]] || exit 1
+[[ -n "${pass}" ]] || exit 1
 
- # Bring the stack down
- swrmgr stack down "${stack}"
- sleep 10
- stack_was_brought_down=1
+run_hooks "stack:backup:before" "${stack}"
 
- # Copy volume data from the database node
- ssh -n "${node}" sudo tar czf - -C "/var/lib/docker/volumes/${file}" . | tar xzf - -C "${file}"
+KEY_FILE="${SWRMGR_SSH_KEY:-/home/ubuntu/.ssh/${NODE_SSH_KEY_NAME}}"
 
- # Encrypt and upload to S3
- tar -czf - -C "${file}" . | openssl enc -aes-256-cbc -salt -pbkdf2 -pass pass:"${pass}" -out "${file}.tar.gz.enc"
+if [[ "${mode}" == "hot" ]]; then
+  # -------------------------------------------------------------------------
+  # Hot backup — mariadb-backup streamed from the running container
+  # -------------------------------------------------------------------------
+  container="$(swrmgr stack _container "${stack}" "db")"
+  [[ -n "${container}" ]] || { echo "Could not find db container for ${stack}" >&2; exit 1; }
 
- if ! aws s3api put-object \
-   --bucket "${bucket}" \
-   --key "${stack}/backups/${timestamp}-${file}.tar.gz.enc" \
-   --body "${file}.tar.gz.enc" \
-   --tagging "cold-backup=true&stack=${stack}&domain=${domain}&path=${folder}&host=${host}"; then
-   echo "Failed to upload backup to S3" >&2
-   exit 2
- fi
+  echo "Hot backup: ${stack} on ${node}..."
 
- # Bring stack back up unless hold flag is set
- [[ -z "${hold}" ]] && swrmgr stack up "${stack}"
+  # Run mariadb-backup inside the container and stream the tar to the manager
+  ssh -i "${KEY_FILE}" "${node}" \
+    "docker exec ${container} mariadb-backup \
+      --backup \
+      --stream=xbstream \
+      --user=root \
+      --password='${pass}' \
+      --target-dir=/tmp/backup" \
+    | openssl enc -aes-256-cbc -salt -pbkdf2 -pass pass:"${pass}" \
+      -out "${file}.xbstream.enc"
 
- rm -rf "${file}"* >/dev/null 2>&1
- trap - EXIT
+else
+  # -------------------------------------------------------------------------
+  # Cold backup — stop stack, copy volume, restart
+  # -------------------------------------------------------------------------
+  echo "Cold backup: ${stack} on ${node}..."
+  echo "${node}"
+  mkdir -p "${file}"
 
- run_hooks "stack:backup:after" "${stack}"
+  swrmgr stack down "${stack}"
+  sleep 10
+
+  ssh -n -i "${KEY_FILE}" "${node}" \
+    sudo tar czf - -C "/var/lib/docker/volumes/${file}" . \
+    | tar xzf - -C "${file}"
+
+  tar -czf - -C "${file}" . \
+    | openssl enc -aes-256-cbc -salt -pbkdf2 -pass pass:"${pass}" \
+      -out "${file}.tar.gz.enc"
+
+  swrmgr stack up "${stack}"
+  rm -rf "${file}"
+fi
+
+# Upload to S3
+enc_file="$(ls ${file}.* 2>/dev/null | head -1)"
+[[ -f "${enc_file}" ]] || { echo "No backup file found" >&2; exit 1; }
+
+aws s3api put-object \
+  --bucket "${bucket}" \
+  --key "${stack}/backups/${timestamp}-$(basename "${enc_file}")" \
+  --body "${enc_file}" \
+  --tagging "stack=${stack}&domain=${domain}&host=${host}&mode=${mode}"
+
+if [[ $? -ne 0 ]]; then
+  rm -f "${enc_file}" 2>/dev/null
+  echo "Failed to upload backup to S3" >&2
+  exit 2
+fi
+
+rm -f "${enc_file}" 2>/dev/null
+
+run_hooks "stack:backup:after" "${stack}"

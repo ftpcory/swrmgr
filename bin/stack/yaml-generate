@@ -34,8 +34,8 @@ IMG_TAG="stable"
 
 cd "${folder}" || exit 1
 
-# Skip if stack.yml already exists
-[[ -f stack.yml ]] && exit 0
+# Skip if stack.yml already has content
+[[ -s stack.yml ]] && exit 0
 
 touch stack.yml
 
@@ -51,8 +51,11 @@ AWSLOG_GROUP="$(hostname | sed -e 's/\./-/g')"
 
 # Export everything envsubst needs
 export stack IMG_TAG AWSLOG_GROUP
+export stack_safe="${stack//./-}"
 export DATABASE_NODE DATABASE_EXPOSE_PORT
 export STACK_DOMAIN="${STACK_DOMAIN:-${stack}}"
+export DB_PLACEMENT_CONSTRAINT="${DB_PLACEMENT_CONSTRAINT:-node.hostname == ${DATABASE_NODE}}"
+export APP_PLACEMENT_CONSTRAINT="${APP_PLACEMENT_CONSTRAINT:-node.role == worker}"
 
 # Run any plugin config resolution hooks
 run_hooks "stack:yaml-generate:before" "${stack}"

@@ -50,10 +50,10 @@ sudo mkdir -p "${INSTALL_ROOT}/plugins"
 
 [[ -z "${USER:-}" ]] && USER="$(whoami)"
 
-sudo chown -R "${USER}:${USER}" "${INSTALL_ROOT}"
-sudo chown -R "${USER}:${USER}" "${CONFIG_DIR}"
-sudo chown -R "${USER}:${USER}" "${LOG_DIR}"
-sudo chown -R "${USER}:${USER}" /var/www/html
+sudo chown -R "${USER}" "${INSTALL_ROOT}"
+sudo chown -R "${USER}" "${CONFIG_DIR}"
+sudo chown -R "${USER}" "${LOG_DIR}"
+sudo chown -R "${USER}" /var/www/html
 
 # Copy core files
 rsync -av --exclude='.git' --exclude='plugins/*/' \
@@ -73,6 +73,11 @@ find "${INSTALL_ROOT}/plugins" -name '*.sh' -o -type f -path '*/bin/*' -o -type 
 # Install main command
 sudo cp "${INSTALL_ROOT}/bin/swrmgr" /usr/local/bin/swrmgr
 sudo chmod +x /usr/local/bin/swrmgr
+
+# ------------------------------------------------------------------------------
+# AWS resources
+# ------------------------------------------------------------------------------
+swrmgr aws setup
 
 # Copy example config if no config exists
 if [[ ! -f /etc/environment ]] || ! grep -q 'SWRMGR_AWS_ACCOUNT_ID' /etc/environment; then

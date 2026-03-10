@@ -26,6 +26,7 @@ run_hooks "system:down:before"
 
 # Shut down all stacks
 while read -r stack; do
+  [[ -z "${stack}" ]] && continue
   swrmgr stack down "${stack}" &
 done <<< "$(swrmgr system stack-list)"
 

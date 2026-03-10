@@ -27,13 +27,14 @@ EOF
 [[ "${1:-}" == "--source-only" ]] && return 0 2>/dev/null || true
 
 stack="$(stack_name "${1}")"
+stack_raw="$(stack_id "${1}")"
 shift 1
 name="${*:-${stack}}"
 
 run_hooks "stack:create:before" "${stack}" "${name}"
 
-swrmgr stack init "${stack}"
-swrmgr stack up "${stack}"
+swrmgr stack init "${stack_raw}"
+swrmgr stack up "${stack_raw}"
 
 # Wait for services to start
 echo "Waiting for stack to start up..."

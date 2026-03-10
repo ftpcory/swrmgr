@@ -1,0 +1,55 @@
+# bin/aws/setup
+#!/usr/bin/env bash
+set -euo pipefail
+. "${SWRMGR_ROOT:-/opt/swrmgr}/lib/core.sh"
+
+# ------------------------------------------------------------------------------
+# Usage — displayed when the --help flag is provided
+# ------------------------------------------------------------------------------
+_usage() {
+  cat <<EOF
+Usage: swrmgr aws setup
+
+One-time initialization of AWS resources required by swrmgr.
+Creates the IAM group for stack users and the shared S3 bucket
+structure. Safe to run multiple times.
+
+Example:
+  swrmgr aws setup
+EOF
+}
+
+# ------------------------------------------------------------------------------
+# Bail out if sourced for --help
+# ------------------------------------------------------------------------------
+[[ "${1:-}" == "--source-only" ]] && return 0 2>/dev/null || true
+
+iam_prefix="${SWRMGR_IAM_PREFIX:-swrmgr}"
+iam_group="${SWRMGR_IAM_GROUP:-swrmgr-customer}"
+bucket="${SWRMGR_S3_BUCKET:-}"
+region="${SWRMGR_AWS_REGION:-us-east-1}"
+
+echo "Setting up AWS resources..."
+
+# IAM group
+if aws iam get-group --group-name "${iam_group}" > /dev/null 2>&1; then
+  echo "IAM group already exists: ${iam_group}"
+else
+  echo "Creating IAM group: ${iam_group}"
+  aws iam create-group --group-name "${iam_group}"
+fi
+
+# S3 bucket
+if [[ -n "${bucket}" ]]; then
+  if aws s3api head-bucket --bucket "${bucket}" 2>/dev/null; then
+    echo "S3 bucket already exists: ${bucket}"
+  else
+    echo "Creating S3 bucket: ${bucket}"
+    aws s3api create-bucket \
+      --bucket "${bucket}" \
+      --region "${region}" \
+      --create-bucket-configuration LocationConstraint="${region}"
+  fi
+fi
+
+echo "AWS setup complete."
