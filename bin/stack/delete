@@ -46,7 +46,7 @@ docker context use default > /dev/null 2>&1
 # Remove stack and project files
 docker stack rm "${stack}" || true
 rm -rf "${project_root}"
-rm -rf "/mnt/dbtmp/${stack}"
+rm -rf "${SWRMGR_DBTMP_DIR:-/var/tmp/swrmgr}/${stack}"
 
 # Remove AWS resources
 swrmgr aws user-delete "${stack}"

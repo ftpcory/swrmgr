@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+base="${SWRMGR_STACKS_DIR:-/var/www/html}"
+start_port="${SWRMGR_PORT_START:-33060}"
+
+max="${start_port}"
+
+for env_file in "${base}"/*/.env; do
+  [[ -f "${env_file}" ]] || continue
+  port="$(grep -i '^DATABASE_EXPOSE_PORT=' "${env_file}" 2>/dev/null | head -1 | cut -d'=' -f2 | tr -d '"')"
+  [[ -n "${port}" ]] && [[ "${port}" =~ ^[0-9]+$ ]] && (( port > max )) && max="${port}"
+done
+
+echo $(( max + 1 ))

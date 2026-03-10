@@ -27,8 +27,9 @@ EOF
 [[ "${1:-}" == "--source-only" ]] && return 0 2>/dev/null || true
 
 stack="$(stack_name "${1}")"
+stack_raw="$(stack_id "${1}")"
 stacks_dir="${SWRMGR_STACKS_DIR:-/var/www/html}"
-project_root="${stacks_dir}/${stack}"
+project_root="${stacks_dir}/${stack_raw}"
 
 [[ -n "${stack}" ]] || {
   echo "A name argument is required"
@@ -45,8 +46,9 @@ run_hooks "stack:init:before" "${stack}"
 }
 
 # Create temp directories
-[[ -d "/mnt/dbtmp/${stack}" ]] || {
-  mkdir -p "/mnt/dbtmp/${stack}"
+tmp_dir="${SWRMGR_DBTMP_DIR:-/var/tmp/swrmgr}"
+[[ -d "${tmp_dir}/${stack}" ]] || {
+  mkdir -p "${tmp_dir}/${stack}"
 }
 
 cd "${project_root}" || exit 1
@@ -61,12 +63,12 @@ swrmgr aws user-create "${stack}"
 swrmgr aws secrets-init "${stack}"
 
 # Generate environment
-swrmgr stack env-generate "${stack}"
+swrmgr stack env-generate "${stack_raw}"
 
 # Save secrets
-swrmgr stack env-save "${stack}"
+swrmgr stack env-save "${stack_raw}"
 
 # Create overlay network
-docker network create --scope=swarm --attachable -d overlay "traefik-public-${stack}" 2>/dev/null || true
+docker network create --scope=swarm --attachable -d overlay "traefik-public-${stack//./-}" 2>/dev/null || true
 
 run_hooks "stack:init:after" "${stack}"

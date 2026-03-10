@@ -1,18 +1,40 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# local prune
+mode="${1:-light}"
+
+# --------------------------------------------------------------------------
+# Light cleanup — safe while stacks are running
+# --------------------------------------------------------------------------
+
+# Prune unused images, stopped containers, build cache
 docker system prune -f -a
 
-# clean up dangling volumes (preserve database volumes)
+# Remove dangling volumes (preserve database volumes)
 while read -r volume; do
   [[ -z "${volume}" ]] && continue
   docker volume rm "${volume}" || true 2>&1
 done <<< "$(docker volume ls --format '{{.Name}}' --filter dangling=true | grep -E -v 'dbdata')"
 
+# Clean up stale overlay network namespaces that aren't attached to anything
+while read -r ns; do
+  [[ -z "${ns}" ]] && continue
+  # Only remove if no process is using it
+  if ! sudo ip netns pids "$(basename "${ns}")" 2>/dev/null | grep -q .; then
+    sudo umount "${ns}" 2>/dev/null || true
+    sudo rm -f "${ns}"
+  fi
+done <<< "$(find /var/run/docker/netns/ -name '1-*' 2>/dev/null)"
+
+[[ "${mode}" == "light" ]] && exit 0
+
+# --------------------------------------------------------------------------
+# Heavy cleanup — requires Docker restart
+# --------------------------------------------------------------------------
+
 # Ensure docker_gwbridge stays off overlay subnets
 gwbridge_addr=$(ip addr show docker_gwbridge 2>/dev/null | awk '/inet /{print $2}')
-if [[ "${gwbridge_addr}" =~ ^172\.2[01]\. ]]; then
+if [[ "${gwbridge_addr}" =~ ^172\.2[12]\. ]]; then
   echo "WARNING: docker_gwbridge is on overlay subnet ${gwbridge_addr} - fixing"
   docker network disconnect -f docker_gwbridge gateway_ingress-sbox 2>/dev/null || true
   docker network rm docker_gwbridge 2>/dev/null || true
@@ -40,7 +62,7 @@ done <<< "$(ls /sys/class/net/ | grep vx)"
 for iface in docker0 docker_gwbridge; do
   while read -r addr; do
     [[ -z "${addr}" ]] && continue
-    if [[ "${addr}" =~ ^172\.2[01]\. ]]; then
+    if [[ "${addr}" =~ ^172\.2[12]\. ]]; then
       echo "Removing conflicting address ${addr} from ${iface}"
       sudo ip addr del "${addr}" dev "${iface}" 2>/dev/null || true
     fi
@@ -55,7 +77,7 @@ sudo find /var/lib/docker/network/files/ -mindepth 1 \
   ! -name "hosts" \
   -delete 2>/dev/null || true
 
-# clean up stale overlay network namespaces
+# clean up stale overlay network namespaces (aggressive — all of them)
 while read -r ns; do
   [[ -z "${ns}" ]] && continue
   sudo umount "${ns}" 2>/dev/null || true

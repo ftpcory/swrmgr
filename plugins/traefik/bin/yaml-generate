@@ -12,9 +12,10 @@ external_networks=""
 
 while read -r stack; do
   [[ -n "${stack}" ]] || continue
-  network_providers="${network_providers}      - \"--providers.docker.network=traefik-public-${stack}\"\n"
-  networks="${networks}      - traefik-public-${stack}\n"
-  external_networks="${external_networks}  traefik-public-${stack}:\n    external: true\n"
+  safe="${stack//./-}"
+  network_providers="${network_providers}      - \"--providers.docker.network=traefik-public-${safe}\"\n"
+  networks="${networks}      - traefik-public-${safe}\n"
+  external_networks="${external_networks}  traefik-public-${safe}:\n    external: true\n"
 done <<< "$(swrmgr system stack-list)"
 
 cat << TEMPLATE
@@ -60,7 +61,7 @@ $(echo -e "${networks}")
       labels:
         - "traefik.enable=true"
         - "traefik.http.services.traefik.loadbalancer.server.port=888"
-        - "traefik.http.routers.traefik.rule=Host(\`traefik.${SWRMGR_BASE_DOMAIN}\`)"
+        - "traefik.http.routers.traefik.rule=Host(\`${SWRMGR_TRAEFIK_DOMAIN:-traefik.localhost}\`)"
         - "traefik.http.routers.traefik.entrypoints=traefik"
         - "traefik.http.routers.traefik.service=api@internal"
 
