@@ -46,7 +46,7 @@ bash "${cleanup_script}" "${mode}"
 # Then SSH to each worker
 while read -r node; do
   [[ -z "${node}" ]] && continue
-  [[ "${node}" == "$(hostname)" ]] && continue
+  [[ "${node}" == "$(docker_hostname)" ]] && continue
   echo "Cleaning up ${node} (${mode})..."
   ssh -i "${KEY_FILE}" "ubuntu@${node}" "bash -s ${mode}" < "${cleanup_script}"
 done <<< "$(swrmgr system node-list)"

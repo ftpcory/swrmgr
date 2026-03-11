@@ -167,6 +167,18 @@ stack_domain() {
   fi
 }
 
+# The Docker swarm hostname for this node (may differ from system hostname)
+docker_hostname() {
+  docker node inspect self --format '{{.Description.Hostname}}' 2>/dev/null || hostname
+}
+
+# Portable in-place sed
+if sed --version 2>/dev/null | grep -q GNU; then
+  sedi() { sed -i "$@"; }
+else
+  sedi() { sed -i '' "$@"; }
+fi
+
 # Load variables from an env file safely (no eval, no expansion, no export).
 # Usage:
 #   env_load_file ".env" "^IMG_TAG$"
@@ -218,4 +230,65 @@ env_load_file() {
 
     printf -v "${key}" '%s' "${val}"
   done < "${file}"
+}
+
+# --------------------------------------------------------------------------
+# Template resolution
+# --------------------------------------------------------------------------
+
+# Resolve the template directory for a given template name.
+# Returns the path or exits 1 if not found.
+resolve_template() {
+  local name="${1}"
+  local dir="${SWRMGR_ROOT}/templates/${name}"
+  [[ -d "${dir}" && -f "${dir}/template.conf" ]] || {
+    echo "Template not found: ${name}" >&2
+    return 1
+  }
+  echo "${dir}"
+}
+
+# Read a stack's template name from its .env (empty if none set).
+stack_template() {
+  local stack="${1}"
+  local folder
+  folder="$(stack_path "${stack}")"
+  grep "^SWRMGR_TEMPLATE=" "${folder}/.env" 2>/dev/null | head -1 | cut -d'=' -f2- | tr -d '"'
+}
+
+# Resolve the stack.yml source for a stack — template-specific or default.
+stack_yml_source() {
+  local stack="${1}"
+  local template
+  template="$(stack_template "${stack}")"
+  if [[ -n "${template}" ]]; then
+    local tdir
+    tdir="$(resolve_template "${template}")"
+    [[ -f "${tdir}/stack.yml" ]] && echo "${tdir}/stack.yml" && return 0
+  fi
+  echo "${SWRMGR_ROOT}/etc/stack.yml"
+}
+
+# Resolve the iam.json source for a stack — template-specific or default.
+stack_iam_source() {
+  local stack="${1}"
+  local template
+  template="$(stack_template "${stack}")"
+  if [[ -n "${template}" ]]; then
+    local tdir
+    tdir="$(resolve_template "${template}" 2>/dev/null || true)"
+    [[ -n "${tdir}" && -f "${tdir}/iam.json" ]] && echo "${tdir}/iam.json" && return 0
+  fi
+  echo "${SWRMGR_ROOT}/etc/iam.json"
+}
+
+# Resolve the stack.env source for a stack — template-specific or default.
+stack_env_source() {
+  local template="${1:-}"
+  if [[ -n "${template}" ]]; then
+    local tdir
+    tdir="$(resolve_template "${template}" 2>/dev/null || true)"
+    [[ -n "${tdir}" && -f "${tdir}/stack.env" ]] && echo "${tdir}/stack.env" && return 0
+  fi
+  echo "${SWRMGR_ROOT}/etc/stack.env"
 }

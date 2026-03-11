@@ -4,7 +4,7 @@ set -euo pipefail
 
 cd /var/www/html || exit 1
 
-POOLS=( "172.20" "172.21" )
+POOLS=( "172.21" "172.22" )
 
 declare -A EXISTING_SUBNET=()
 while read -r name subnet; do
@@ -21,7 +21,7 @@ done < <(
 declare -A USED=()
 for n in "${!EXISTING_SUBNET[@]}"; do
   s="${EXISTING_SUBNET[$n]}"
-  if [[ "$s" =~ ^172\.(20|21)\.([0-9]{1,3})\.0/24$ ]]; then
+  if [[ "$s" =~ ^172\.(21|22)\.([0-9]{1,3})\.0/24$ ]]; then
     pool="${BASH_REMATCH[1]}"
     oct="${BASH_REMATCH[2]}"
     USED["$pool:$oct"]=1

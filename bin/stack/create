@@ -7,7 +7,7 @@ set -euo pipefail
 # ------------------------------------------------------------------------------
 _usage() {
   cat <<EOF
-Usage: swrmgr stack create <stack-name> [customer name]
+Usage: swrmgr stack create <stack-name> [--template <name>] [customer name]
 
 Full provisioning pipeline for a new stack. Runs init, up, waits for
 services to start, fires post-create hooks, and registers DNS records.
@@ -16,8 +16,16 @@ Arguments:
   stack-name      Name of the stack to create
   customer name   Optional display name for the customer
 
+Options:
+  --template <name>   Use a stack template (defines services, env defaults, IAM)
+
 Example:
-  swrmgr stack create acme-corp "Acme Corporation"
+  swrmgr stack create acme-corp
+  swrmgr stack create mysite.com --template wordpress
+  swrmgr stack create acme-corp --template laravel "Acme Corporation"
+
+Available templates:
+  swrmgr system template-list
 EOF
 }
 
@@ -29,11 +37,28 @@ EOF
 stack="$(stack_name "${1}")"
 stack_raw="$(stack_id "${1}")"
 shift 1
-name="${*:-${stack}}"
+
+template=""
+name=""
+
+while [[ $# -gt 0 ]]; do
+  case "${1}" in
+    --template) shift; template="${1}" ;;
+    *) name="${name:+${name} }${1}" ;;
+  esac
+  shift
+done
+
+name="${name:-${stack}}"
+
+# Validate template if specified
+if [[ -n "${template}" ]]; then
+  resolve_template "${template}" > /dev/null || exit 1
+fi
 
 run_hooks "stack:create:before" "${stack}" "${name}"
 
-swrmgr stack init "${stack_raw}"
+swrmgr stack init "${stack_raw}" ${template:+--template "${template}"}
 swrmgr stack up "${stack_raw}"
 
 # Wait for services to start

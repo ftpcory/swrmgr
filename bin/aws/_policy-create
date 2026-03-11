@@ -1,18 +1,23 @@
 #!/usr/bin/env bash
 set -euo pipefail
+. "${SWRMGR_ROOT:-/opt/swrmgr}/lib/core.sh"
 
 [[ -n "${1:-}" ]] || { echo "no username provided. exiting"; exit 1; }
 
-user="${1}"
+stack="${1}"
 iam_prefix="${SWRMGR_IAM_PREFIX:-swrmgr}"
 config_dir="${SWRMGR_CONFIG_DIR:-/etc/swrmgr}"
 
-cp "${SWRMGR_ROOT:-/opt/swrmgr}/etc/iam.json" "${config_dir}/${iam_prefix}-iam-policy-${user}.json"
-sed -i -e "s/REPLACE_NAME/${user}/g" "${config_dir}/${iam_prefix}-iam-policy-${user}.json"
+export stack
+export SWRMGR_S3_BUCKET="${SWRMGR_S3_BUCKET:?SWRMGR_S3_BUCKET is not set}"
+
+iam_source="$(stack_iam_source "${stack}")"
+
+envsubst < "${iam_source}" > "${config_dir}/${iam_prefix}-iam-policy-${stack}.json"
 
 aws iam create-policy \
-  --policy-name "${iam_prefix}-iam-policy-${user}" \
-  --tags "Key=stack,Value=${user}" \
-  --policy-document "file://${config_dir}/${iam_prefix}-iam-policy-${user}.json"
+  --policy-name "${iam_prefix}-iam-policy-${stack}" \
+  --tags "Key=stack,Value=${stack}" \
+  --policy-document "file://${config_dir}/${iam_prefix}-iam-policy-${stack}.json"
 
-rm -f "${config_dir}/${iam_prefix}-iam-policy-${user}.json" || true
+rm -f "${config_dir}/${iam_prefix}-iam-policy-${stack}.json" || true

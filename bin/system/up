@@ -29,7 +29,6 @@ run_hooks "system:up:before"
 
 # Reactivate all nodes
 while read -r node; do
-  [[ "${node}" == "$(hostname)" ]] && continue
   docker node update --availability=active "${node}"
 done <<< "$(swrmgr system node-list)"
 

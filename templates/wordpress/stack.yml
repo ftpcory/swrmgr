@@ -1,0 +1,80 @@
+# WordPress stack template
+# All ${VARIABLE} references are resolved by envsubst at deploy time.
+
+services:
+  db:
+    image: mariadb:11
+    env_file: .env
+    environment:
+      MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD}
+      MARIADB_DATABASE: ${MARIADB_DATABASE}
+      MARIADB_USER: ${MARIADB_USER}
+      MARIADB_PASSWORD: ${MARIADB_PASSWORD}
+    ports:
+      - target: 3306
+        published: ${DATABASE_EXPOSE_PORT}
+        protocol: tcp
+        mode: host
+    volumes:
+      - dbdata:/var/lib/mysql
+    networks:
+      - internal
+    deploy:
+      update_config:
+        parallelism: 1
+        order: stop-first
+        failure_action: rollback
+      labels:
+        - "traefik.enable=false"
+      placement:
+        constraints: [${DB_PLACEMENT_CONSTRAINT}]
+
+  redis:
+    image: redis:7-alpine
+    networks:
+      - internal
+    deploy:
+      placement:
+        constraints: [${APP_PLACEMENT_CONSTRAINT}]
+      labels:
+        - "traefik.enable=false"
+
+  wordpress:
+    image: wordpress:6-php8.3-fpm
+    env_file: .env
+    environment:
+      WORDPRESS_DB_HOST: db:3306
+      WORDPRESS_DB_NAME: ${MARIADB_DATABASE}
+      WORDPRESS_DB_USER: ${MARIADB_USER}
+      WORDPRESS_DB_PASSWORD: ${MARIADB_PASSWORD}
+      WORDPRESS_CONFIG_EXTRA: |
+        define('WP_REDIS_HOST', 'redis');
+        define('WP_REDIS_PORT', 6379);
+    volumes:
+      - wpdata:/var/www/html
+    networks:
+      - traefik-public-${stack_safe}
+      - internal
+    deploy:
+      update_config:
+        parallelism: 1
+        order: start-first
+        failure_action: rollback
+      placement:
+        constraints: [${APP_PLACEMENT_CONSTRAINT}]
+      labels:
+        - "traefik.enable=true"
+        - "traefik.docker.network=traefik-public-${stack_safe}"
+        - "traefik.http.routers.${stack_safe}_wp.rule=Host(`${STACK_DOMAIN}`)"
+        - "traefik.http.routers.${stack_safe}_wp.entrypoints=web"
+        - "traefik.http.services.${stack_safe}_wp.loadbalancer.server.port=80"
+
+volumes:
+  dbdata:
+  wpdata:
+
+networks:
+  internal:
+    driver: overlay
+  traefik-public-${stack_safe}:
+    external: true

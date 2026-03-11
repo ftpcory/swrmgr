@@ -60,4 +60,4 @@ export APP_PLACEMENT_CONSTRAINT="${APP_PLACEMENT_CONSTRAINT:-node.role == worker
 # Run any plugin config resolution hooks
 run_hooks "stack:yaml-generate:before" "${stack}"
 
-envsubst < "${SWRMGR_ROOT}/etc/stack.yml" > stack.yml
+envsubst < "$(stack_yml_source "${stack}")" > stack.yml
