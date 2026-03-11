@@ -7,7 +7,7 @@ set -euo pipefail
 # ------------------------------------------------------------------------------
 _usage() {
   cat <<EOF
-Usage: swrmgr stack init <stack-name>
+Usage: swrmgr stack init <stack-name> [--template <n>]
 
 Initialize a new stack without deploying it. Creates the project
 directory, temp directories, IAM user, S3 resources, Secrets Manager
@@ -16,8 +16,12 @@ entry, generates the environment, and creates the overlay network.
 Arguments:
   stack-name    Name of the stack to initialize
 
+Options:
+  --template <n>   Use a stack template (defines services, env defaults, IAM)
+
 Example:
   swrmgr stack init acme-corp
+  swrmgr stack init mysite.com --template wordpress
 EOF
 }
 
@@ -28,6 +32,17 @@ EOF
 
 stack="$(stack_name "${1}")"
 stack_raw="$(stack_id "${1}")"
+shift 1
+
+template=""
+while [[ $# -gt 0 ]]; do
+  case "${1}" in
+    --template) shift; template="${1}" ;;
+    *) ;;
+  esac
+  shift
+done
+
 stacks_dir="${SWRMGR_STACKS_DIR:-/var/www/html}"
 project_root="${stacks_dir}/${stack_raw}"
 
@@ -53,12 +68,23 @@ tmp_dir="${SWRMGR_DBTMP_DIR:-/var/tmp/swrmgr}"
 
 cd "${project_root}" || exit 1
 
-# Copy initial env template if needed
-[[ -f .env ]] || {
-  [[ -f "${SWRMGR_ROOT}/etc/stack.env" ]] && cp "${SWRMGR_ROOT}/etc/stack.env" .env
-}
+# Store template reference in .env before anything else
+if [[ -n "${template}" ]]; then
+  resolve_template "${template}" > /dev/null || exit 1
+  grep -q '^SWRMGR_TEMPLATE=' .env 2>/dev/null || echo "SWRMGR_TEMPLATE=${template}" >> .env
+fi
 
-# Initialize AWS resources
+# Copy initial env from template or default
+if [[ ! -s .env || ! -f .env ]]; then
+  env_source="$(stack_env_source "${template}")"
+  [[ -f "${env_source}" ]] && cp "${env_source}" .env
+  # Re-add template reference if it was wiped by the copy
+  if [[ -n "${template}" ]]; then
+    grep -q '^SWRMGR_TEMPLATE=' .env 2>/dev/null || echo "SWRMGR_TEMPLATE=${template}" >> .env
+  fi
+fi
+
+# Initialize AWS resources (uses template-aware IAM if available)
 swrmgr aws user-create "${stack}"
 swrmgr aws secrets-init "${stack}"
 

@@ -66,6 +66,11 @@ if [[ -d plugins/ ]]; then
   rsync -av plugins/ "${INSTALL_ROOT}/plugins/"
 fi
 
+# Install templates (preserve existing)
+if [[ -d templates/ ]]; then
+  rsync -av templates/ "${INSTALL_ROOT}/templates/"
+fi
+
 # Make all scripts executable
 find "${INSTALL_ROOT}/bin" -type f -exec chmod +x {} \;
 find "${INSTALL_ROOT}/plugins" -name '*.sh' -o -type f -path '*/bin/*' -o -type f -path '*/hooks/*' | xargs chmod +x 2>/dev/null || true

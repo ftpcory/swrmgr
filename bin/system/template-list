@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+set -euo pipefail
+. "${SWRMGR_ROOT:-/opt/swrmgr}/lib/core.sh"
+
+# ------------------------------------------------------------------------------
+# Usage — displayed when the --help flag is provided
+# ------------------------------------------------------------------------------
+_usage() {
+  cat <<EOF
+Usage: swrmgr system template-list
+
+List all available stack templates.
+
+Example:
+  swrmgr system template-list
+EOF
+}
+
+# ------------------------------------------------------------------------------
+# Bail out if sourced for --help
+# ------------------------------------------------------------------------------
+[[ "${1:-}" == "--source-only" ]] && return 0 2>/dev/null || true
+
+templates_dir="${SWRMGR_ROOT}/templates"
+
+if [[ ! -d "${templates_dir}" ]] || [[ -z "$(ls -A "${templates_dir}" 2>/dev/null)" ]]; then
+  echo "No templates installed."
+  echo "Add templates to: ${templates_dir}/"
+  exit 0
+fi
+
+for d in "${templates_dir}"/*/; do
+  [[ -f "${d}/template.conf" ]] || continue
+  name="$(basename "${d}")"
+  desc="$(grep '^TEMPLATE_DESCRIPTION=' "${d}/template.conf" 2>/dev/null | head -1 | cut -d'=' -f2- | tr -d '"')"
+  version="$(grep '^TEMPLATE_VERSION=' "${d}/template.conf" 2>/dev/null | head -1 | cut -d'=' -f2- | tr -d '"')"
+  printf "  %-20s %s %s\n" "${name}" "${version:+v${version}}" "${desc:+— ${desc}}"
+done

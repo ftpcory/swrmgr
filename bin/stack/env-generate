@@ -32,17 +32,28 @@ folder="${stacks_dir}/${stack_raw}"
 
 cd "${folder}" || exit 1
 
-# Start from template if available, otherwise create a minimal .env
-if [[ -f "${SWRMGR_ROOT}/etc/template.env" ]]; then
-  cp "${SWRMGR_ROOT}/etc/template.env" .env
-else
-  touch .env
+# Determine template (may already be set in .env from init)
+template="$(grep '^SWRMGR_TEMPLATE=' .env 2>/dev/null | head -1 | cut -d'=' -f2- || true)"
+
+# Start from template env if available, otherwise default
+if [[ ! -s .env ]]; then
+  env_source="$(stack_env_source "${template}")"
+  [[ -f "${env_source}" ]] && cp "${env_source}" .env
+  # Preserve template reference
+  if [[ -n "${template}" ]]; then
+    grep -q '^SWRMGR_TEMPLATE=' .env 2>/dev/null || echo "SWRMGR_TEMPLATE=${template}" >> .env
+  fi
 fi
 
 # Set a key only if it doesn't already exist in .env
 env_set_default() {
   local key="${1}" value="${2}"
-  grep -q "^${key}=" .env 2>/dev/null || echo "${key}=${value}" >> .env
+  local current
+  current="$(grep "^${key}=" .env 2>/dev/null | head -1 | cut -d'=' -f2- || true)"
+  [[ -n "${current}" ]] || {
+    sedi "/^${key}=/d" .env 2>/dev/null || true
+    echo "${key}=${value}" >> .env
+  }
 }
 
 # Generate database values (only if not already set)
@@ -69,8 +80,5 @@ if [[ -f "${iam_json}" ]]; then
   env_set_default AWS_ACCESS_KEY_ID "$(jq -r '.AccessKey.AccessKeyId' "${iam_json}")"
   env_set_default AWS_SECRET_ACCESS_KEY "$(jq -r '.AccessKey.SecretAccessKey' "${iam_json}")"
 fi
-
-# Set STACK_DOMAIN to the raw directory name
-grep -q '^STACK_DOMAIN=' .env || echo "STACK_DOMAIN=${stack_raw}" >> .env
 
 run_hooks "stack:env-generate:after" "${stack}"

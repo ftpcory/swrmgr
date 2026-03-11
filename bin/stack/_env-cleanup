@@ -6,5 +6,3 @@ stack="$(stack_name "${1}")"
 folder="$(stack_path "${stack}")"
 
 cd "${folder}" || exit 1
-
-# rm -f stack.yml .env .env.bak env.json 2>/dev/null || true

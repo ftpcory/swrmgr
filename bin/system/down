@@ -40,7 +40,7 @@ done
 
 # Drain worker nodes
 while read -r node; do
-  [[ "${node}" == "$(hostname)" ]] && continue
+  [[ -z "${node}" ]] && continue.
   docker node update --availability=drain "${node}"
 done <<< "$(swrmgr system node-list)"
 
